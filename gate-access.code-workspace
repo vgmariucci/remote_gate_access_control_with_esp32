@@ -1,0 +1,10 @@
+{
+  "folders": [
+    { "name": "repo", "path": "." },
+    { "name": "firmware", "path": "firmware" }
+  ],
+  "settings": {
+    "idf.port": "/dev/ttyACM0",
+    "idf.flashType": "JTAG"
+  }
+}

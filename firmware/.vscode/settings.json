@@ -1,0 +1,15 @@
+{
+  "idf.currentSetup": "/home/vgm/.espressif/v5.4.4/esp-idf",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "/home/vgm/.espressif/tools/esp-clang/esp-18.1.2_20240912/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/home/vgm/wsl_projects/IoT_and_Android/ESP32_Projects/remote_gate_access_control_with_esp32/firmware/build"
+  ]
+}
