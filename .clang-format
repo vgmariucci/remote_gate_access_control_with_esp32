@@ -1,0 +1,8 @@
+# Espressif's own style, so that IDF sources and yours look alike.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 95
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+BreakBeforeBraces: Linux
+SortIncludes: true

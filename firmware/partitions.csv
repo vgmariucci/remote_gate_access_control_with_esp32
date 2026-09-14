@@ -1,0 +1,7 @@
+# name,      type, subtype,  offset,   size,   flags
+nvs,         data, nvs,      ,         24K,
+nvs_keys,    data, nvs_keys, ,         4K,     encrypted
+otadata,     data, ota,      ,         8K,
+phy_init,    data, phy,      ,         4K,
+ota_0,       app,  ota_0,    ,         1600K,
+ota_1,       app,  ota_1,    ,         1600K,

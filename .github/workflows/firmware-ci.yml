@@ -1,0 +1,66 @@
+name: firmware-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ['firmware/**', '.github/workflows/firmware-ci.yml']
+  pull_request:
+    paths: ['firmware/**', '.github/workflows/firmware-ci.yml']
+
+# Pin the IDF version to whatever you installed locally. Matching them is
+# the difference between "works on my machine" and a reproducible build.
+env:
+  IDF_IMAGE: espressif/idf:v5.4
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang-format
+          find firmware -name '*.c' -o -name '*.h' \
+            | xargs clang-format --dry-run --Werror
+
+  host-tests:
+    name: unit tests (linux target)
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run access_core suite on the host
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd firmware/host_test
+          idf.py --preview set-target linux
+          idf.py build
+          ./build/access_core_host_test.elf
+
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.4
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32s3, esp32]
+    steps:
+      - uses: actions/checkout@v4
+      - name: idf.py build
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd firmware
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portao-firmware-${{ matrix.target }}
+          path: |
+            firmware/build/*.bin
+            firmware/build/*.elf
+          retention-days: 14

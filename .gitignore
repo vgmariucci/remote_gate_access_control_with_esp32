@@ -1,0 +1,31 @@
+# ESP-IDF build output
+firmware/build/
+firmware/host_test/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/host_test/sdkconfig
+firmware/host_test/sdkconfig.old
+firmware/dependencies.lock
+managed_components/
+
+# Secrets. Never commit a bot token, an HMAC key or a device salt.
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Editors
+.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+
+# Python / web app
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.next/

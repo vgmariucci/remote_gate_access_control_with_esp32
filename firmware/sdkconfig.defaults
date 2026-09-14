@@ -1,0 +1,28 @@
+# Checked into git. Everything reproducible lives here; sdkconfig itself
+# is generated and gitignored.
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# Watchdogs: a hung controller must reboot, not sit there with the relay
+# in an unknown state.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_INT_WDT=y
+
+# Logging. Drop to WARN for release builds so that codes and ids cannot
+# leak through a serial console someone left attached.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Partition layout with two OTA slots plus an encrypted NVS partition.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Flash size. The dual-OTA layout in partitions.csv needs 3.2 MB, so the
+# 2 MB default cannot hold it. Must match the physical part.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Enable these only once the board is final: flash encryption is a
+# one-way door on a production device.
+# CONFIG_SECURE_FLASH_ENC_ENABLED=y
+# CONFIG_SECURE_BOOT=y
+# CONFIG_NVS_ENCRYPTION=y
