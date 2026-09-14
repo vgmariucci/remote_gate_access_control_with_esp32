@@ -20,25 +20,25 @@
 #ifndef RTC_DS3232_H
 #define RTC_DS3232_H
 
-#include <stdbool.h>
-#include <stdint.h>
 #include "driver/i2c_master.h"
 #include "esp_err.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define DS3232_I2C_ADDR   0x68
-#define DS3232_SRAM_BASE  0x14  /* 0x14..0xFF, 236 bytes */
-#define DS3232_SRAM_SIZE  236
+#define DS3232_I2C_ADDR 0x68
+#define DS3232_SRAM_BASE 0x14 /* 0x14..0xFF, 236 bytes */
+#define DS3232_SRAM_SIZE 236
 
 /* Anything outside this range means the reading is not believable. */
 #define RTC_MIN_PLAUSIBLE_EPOCH 1767225600LL /* 2026-01-01 UTC */
 #define RTC_MAX_PLAUSIBLE_EPOCH 2524608000LL /* 2050-01-01 UTC */
 
 typedef struct {
-    uint8_t  attempts_used;
+    uint8_t attempts_used;
     uint32_t lockout_until_epoch; /* 0 = not locked out */
     uint32_t boot_count;
 } rtc_persist_t;
