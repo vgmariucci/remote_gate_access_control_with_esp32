@@ -6,13 +6,13 @@
  * the whole point of keeping it free of GPIO: bounce and long-press are
  * timing bugs, and timing bugs are miserable to reproduce on hardware.
  */
-#include "unity.h"
 #include "keypad_logic.h"
+#include "unity.h"
 
 #define BIT_FOR(idx) ((uint16_t)(1u << (idx)))
-#define KEY_1  BIT_FOR(0)
-#define KEY_5  BIT_FOR(5)
-#define KEY_A  BIT_FOR(3)
+#define KEY_1 BIT_FOR(0)
+#define KEY_5 BIT_FOR(5)
+#define KEY_A BIT_FOR(3)
 
 static kp_logic_t st;
 static kp_event_t ev[KP_MAX_EVENTS];
@@ -22,11 +22,15 @@ static size_t feed(uint16_t raw, uint32_t now_ms)
     return kp_logic_update(&st, raw, now_ms, ev, KP_MAX_EVENTS);
 }
 
-void setUp(void) { kp_logic_init(&st); }
-void tearDown(void) {}
+/* See the note in test_ui.c: no global setUp() in a multi-suite binary. */
+static void kp_fixture(void)
+{
+    kp_logic_init(&st);
+}
 
 TEST_CASE("keymap covers all sixteen positions", "[keypad]")
 {
+    kp_fixture();
     const char expected[] = "123A456B789C*0#D";
     for (int i = 0; i < KP_KEYS; i++) {
         TEST_ASSERT_EQUAL_CHAR(expected[i], kp_index_to_char(i));
@@ -37,6 +41,7 @@ TEST_CASE("keymap covers all sixteen positions", "[keypad]")
 
 TEST_CASE("a press shorter than the debounce window is ignored", "[keypad]")
 {
+    kp_fixture();
     TEST_ASSERT_EQUAL_UINT(0, feed(KEY_5, 0));
     TEST_ASSERT_EQUAL_UINT(0, feed(KEY_5, 10)); /* still under 15 ms */
     TEST_ASSERT_EQUAL_UINT(0, feed(0, 12));
@@ -45,6 +50,7 @@ TEST_CASE("a press shorter than the debounce window is ignored", "[keypad]")
 
 TEST_CASE("a stable press emits exactly one event", "[keypad]")
 {
+    kp_fixture();
     TEST_ASSERT_EQUAL_UINT(0, feed(KEY_5, 0));
     TEST_ASSERT_EQUAL_UINT(1, feed(KEY_5, KP_DEBOUNCE_MS));
     TEST_ASSERT_EQUAL(KP_EV_PRESS, ev[0].type);
@@ -57,6 +63,7 @@ TEST_CASE("a stable press emits exactly one event", "[keypad]")
 
 TEST_CASE("contact bounce produces one event, not several", "[keypad]")
 {
+    kp_fixture();
     uint32_t t = 0;
     const uint16_t chatter[] = {KEY_1, 0, KEY_1, 0, KEY_1};
     for (int i = 0; i < 5; i++) {
@@ -74,6 +81,7 @@ TEST_CASE("contact bounce produces one event, not several", "[keypad]")
 
 TEST_CASE("long press fires once and only once", "[keypad]")
 {
+    kp_fixture();
     TEST_ASSERT_EQUAL_UINT(0, feed(KEY_A, 0));
     TEST_ASSERT_EQUAL_UINT(1, feed(KEY_A, KP_DEBOUNCE_MS));
     TEST_ASSERT_EQUAL(KP_EV_PRESS, ev[0].type);
@@ -92,6 +100,7 @@ TEST_CASE("long press fires once and only once", "[keypad]")
 
 TEST_CASE("two keys at once are rejected until release", "[keypad]")
 {
+    kp_fixture();
     uint32_t t = 0;
     TEST_ASSERT_EQUAL_UINT(0, feed(KEY_1 | KEY_5, t));
     t += KP_DEBOUNCE_MS;
@@ -118,6 +127,7 @@ TEST_CASE("two keys at once are rejected until release", "[keypad]")
 
 TEST_CASE("nine sequential presses yield nine events", "[keypad]")
 {
+    kp_fixture();
     const int indices[9] = {0, 1, 2, 4, 5, 6, 3, 7, 12}; /* 123456AB* */
     uint32_t t = 0;
     int seen = 0;

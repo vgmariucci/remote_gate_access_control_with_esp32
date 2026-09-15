@@ -5,8 +5,8 @@
  * happen: the buffer length never reaches the renderer, an expired code
  * does not burn an attempt, and the lockout survives a restart.
  */
-#include "unity.h"
 #include "ui.h"
+#include "unity.h"
 
 static ui_ctx_t ctx;
 
@@ -18,15 +18,17 @@ static void press_n(uint32_t *t, int n)
     }
 }
 
-void setUp(void)
+/* Not setUp(): three suites link into one host binary, so a global
+ * setUp() would be defined three times. Each case calls this itself. */
+static void ui_fixture(void)
 {
     ui_init(&ctx, 0, 0, 0);
     ui_set_clock_trusted(&ctx, true);
 }
-void tearDown(void) {}
 
 TEST_CASE("boot without trusted time refuses everything", "[ui]")
 {
+    ui_fixture();
     ui_init(&ctx, 0, 0, 0);
     TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, 0).screen);
     TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, 10));
@@ -35,6 +37,7 @@ TEST_CASE("boot without trusted time refuses everything", "[ui]")
 
 TEST_CASE("the render payload never carries the entry length", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     press_n(&t, 4);
     ui_render_t r = ui_render(&ctx, t);
@@ -48,6 +51,7 @@ TEST_CASE("the render payload never carries the entry length", "[ui]")
 
 TEST_CASE("each keypress refills the countdown bar", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     ui_on_key(&ctx, t);
     TEST_ASSERT_EQUAL_UINT16(1000, ui_render(&ctx, t).progress_permille);
@@ -61,6 +65,7 @@ TEST_CASE("each keypress refills the countdown bar", "[ui]")
 
 TEST_CASE("the ninth key submits", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     for (int i = 0; i < UI_CODE_LEN - 1; i++) {
         TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, t));
@@ -71,6 +76,7 @@ TEST_CASE("the ninth key submits", "[ui]")
 
 TEST_CASE("ten seconds of silence abandons the entry", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     press_n(&t, 3);
     TEST_ASSERT_EQUAL(UI_SCREEN_ENTRY, ui_render(&ctx, t).screen);
@@ -84,6 +90,7 @@ TEST_CASE("ten seconds of silence abandons the entry", "[ui]")
 
 TEST_CASE("long press clears immediately", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     press_n(&t, 5);
     TEST_ASSERT_EQUAL(UI_ACTION_CLEAR_BUFFER, ui_on_long_press(&ctx, t));
@@ -99,6 +106,7 @@ TEST_CASE("long press clears immediately", "[ui]")
 
 TEST_CASE("granted shows OK for three seconds then returns to idle", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 1000;
     ui_on_result(&ctx, AC_GRANTED, t);
     TEST_ASSERT_EQUAL(UI_SCREEN_GRANTED, ui_render(&ctx, t).screen);
@@ -112,6 +120,7 @@ TEST_CASE("granted shows OK for three seconds then returns to idle", "[ui]")
 
 TEST_CASE("wrong codes count up to five then lock out", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     for (int i = 1; i <= 4; i++) {
         ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
@@ -132,6 +141,7 @@ TEST_CASE("wrong codes count up to five then lock out", "[ui]")
 
 TEST_CASE("the keypad is inert during lockout", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     uint32_t locked_at = 0;
     for (int i = 0; i < UI_MAX_ATTEMPTS; i++) {
@@ -145,14 +155,14 @@ TEST_CASE("the keypad is inert during lockout", "[ui]")
 
     /* The bar measures from when the lockout was armed, not from the
      * last tick. Halfway through, it is half full. */
-    TEST_ASSERT_EQUAL_UINT16(
-        500, ui_render(&ctx, locked_at + UI_LOCKOUT_MS / 2).progress_permille);
-    TEST_ASSERT_EQUAL_UINT16(
-        0, ui_render(&ctx, locked_at + UI_LOCKOUT_MS).progress_permille);
+    TEST_ASSERT_EQUAL_UINT16(500,
+                             ui_render(&ctx, locked_at + UI_LOCKOUT_MS / 2).progress_permille);
+    TEST_ASSERT_EQUAL_UINT16(0, ui_render(&ctx, locked_at + UI_LOCKOUT_MS).progress_permille);
 }
 
 TEST_CASE("lockout releases and clears the counter", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     for (int i = 0; i < UI_MAX_ATTEMPTS; i++) {
         ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
@@ -168,6 +178,7 @@ TEST_CASE("lockout releases and clears the counter", "[ui]")
 
 TEST_CASE("a lockout restored from RTC SRAM still holds", "[ui]")
 {
+    ui_fixture();
     /* Power was cut 100 s into a 300 s lockout. The DS3232 kept the
      * counter, so the reboot must not hand the attacker a clean slate. */
     ui_init(&ctx, 5, 200000, 0);
@@ -179,6 +190,7 @@ TEST_CASE("a lockout restored from RTC SRAM still holds", "[ui]")
 
 TEST_CASE("a genuine code outside its window costs no attempt", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     ui_on_result(&ctx, AC_DENIED_NOT_YET, t);
     TEST_ASSERT_EQUAL(UI_SCREEN_NOT_YET, ui_render(&ctx, t).screen);
@@ -202,6 +214,7 @@ TEST_CASE("a genuine code outside its window costs no attempt", "[ui]")
 
 TEST_CASE("a success wipes the accumulated attempts", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
     t += UI_DENIED_MS;
@@ -217,6 +230,7 @@ TEST_CASE("a success wipes the accumulated attempts", "[ui]")
 
 TEST_CASE("losing trusted time mid-entry fails closed", "[ui]")
 {
+    ui_fixture();
     uint32_t t = 0;
     press_n(&t, 6);
     ui_set_clock_trusted(&ctx, false);

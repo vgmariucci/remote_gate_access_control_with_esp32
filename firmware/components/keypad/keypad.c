@@ -1,17 +1,17 @@
 #include "keypad.h"
 
-#include <string.h>
 #include "esp_log.h"
-#include "esp_rom_sys.h"  /* esp_rom_delay_us */
+#include "esp_rom_sys.h" /* esp_rom_delay_us */
 #include "esp_timer.h"
 #include "freertos/task.h"
+#include <string.h>
 
 static const char *TAG = "keypad";
 
 static keypad_config_t s_cfg;
-static QueueHandle_t   s_queue;
-static TaskHandle_t    s_task;
-static volatile bool   s_running;
+static QueueHandle_t s_queue;
+static TaskHandle_t s_task;
+static volatile bool s_running;
 
 /*
  * One scan pass: drive each row low in turn, read the columns. A column
@@ -46,9 +46,9 @@ static uint16_t keypad_scan_once(void)
 static void keypad_task(void *arg)
 {
     (void)arg;
-    kp_logic_t   logic;
-    kp_event_t   events[KP_MAX_EVENTS];
-    TickType_t   last_wake = xTaskGetTickCount();
+    kp_logic_t logic;
+    kp_event_t events[KP_MAX_EVENTS];
+    TickType_t last_wake = xTaskGetTickCount();
 
     kp_logic_init(&logic);
 

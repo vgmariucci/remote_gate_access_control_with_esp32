@@ -11,5 +11,7 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=/home/vgm/wsl_projects/IoT_and_Android/ESP32_Projects/remote_gate_access_control_with_esp32/firmware/build"
-  ]
+  ],
+  "idf.flashType": "JTAG",
+  "idf.port": "/dev/ttyACM0"
 }

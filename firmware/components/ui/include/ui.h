@@ -21,40 +21,40 @@
 #ifndef UI_H
 #define UI_H
 
+#include "access_core.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "access_core.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define UI_CODE_LEN        9      /* fixed: 6 digits + 2 letters + 1 special */
+#define UI_CODE_LEN 9 /* fixed: 6 digits + 2 letters + 1 special */
 #define UI_ENTRY_TIMEOUT_MS 10000
-#define UI_GRANTED_MS      3000
-#define UI_DENIED_MS       2000
-#define UI_INFO_MS         3000   /* "not yet" / "expired" notices */
-#define UI_MAX_ATTEMPTS    5
-#define UI_LOCKOUT_MS      300000 /* 5 minutes */
+#define UI_GRANTED_MS 3000
+#define UI_DENIED_MS 2000
+#define UI_INFO_MS 3000 /* "not yet" / "expired" notices */
+#define UI_MAX_ATTEMPTS 5
+#define UI_LOCKOUT_MS 300000 /* 5 minutes */
 
 typedef enum {
-    UI_SCREEN_IDLE,      /* invite to type */
-    UI_SCREEN_ENTRY,     /* countdown bar, nothing else */
-    UI_SCREEN_GRANTED,   /* big OK */
-    UI_SCREEN_DENIED,    /* "tentativa N de 5" */
-    UI_SCREEN_NOT_YET,   /* genuine code, before its window */
-    UI_SCREEN_EXPIRED,   /* genuine code, after its window */
-    UI_SCREEN_LOCKOUT,   /* blocked, with countdown */
-    UI_SCREEN_NO_CLOCK   /* fail closed: time not trusted */
+    UI_SCREEN_IDLE,    /* invite to type */
+    UI_SCREEN_ENTRY,   /* countdown bar, nothing else */
+    UI_SCREEN_GRANTED, /* big OK */
+    UI_SCREEN_DENIED,  /* "tentativa N de 5" */
+    UI_SCREEN_NOT_YET, /* genuine code, before its window */
+    UI_SCREEN_EXPIRED, /* genuine code, after its window */
+    UI_SCREEN_LOCKOUT, /* blocked, with countdown */
+    UI_SCREEN_NO_CLOCK /* fail closed: time not trusted */
 } ui_screen_t;
 
 typedef struct {
     ui_screen_t screen;
     /* 0..1000 for the entry bar and the lockout bar. Integer permille so
      * the renderer needs no float and the tests compare exactly. */
-    uint16_t    progress_permille;
-    uint8_t     attempts_used;     /* meaningful on DENIED and LOCKOUT */
-    uint32_t    seconds_remaining; /* meaningful on LOCKOUT */
+    uint16_t progress_permille;
+    uint8_t attempts_used;      /* meaningful on DENIED and LOCKOUT */
+    uint32_t seconds_remaining; /* meaningful on LOCKOUT */
 } ui_render_t;
 
 typedef enum {
@@ -65,20 +65,20 @@ typedef enum {
 
 typedef struct {
     ui_screen_t screen;
-    uint8_t     entry_len;
-    uint32_t    entry_deadline_ms;
-    uint32_t    screen_until_ms;   /* when a transient screen expires */
-    uint8_t     attempts_used;
-    uint32_t    lockout_until_ms;
-    bool        clock_trusted;
+    uint8_t entry_len;
+    uint32_t entry_deadline_ms;
+    uint32_t screen_until_ms; /* when a transient screen expires */
+    uint8_t attempts_used;
+    uint32_t lockout_until_ms;
+    bool clock_trusted;
 } ui_ctx_t;
 
 /*
  * `attempts_used` is restored from the DS3232 battery-backed SRAM, not
  * zeroed, so that cutting power does not reset the lockout.
  */
-void ui_init(ui_ctx_t *ctx, uint8_t restored_attempts,
-             uint32_t restored_lockout_remaining_ms, uint32_t now_ms);
+void ui_init(ui_ctx_t *ctx, uint8_t restored_attempts, uint32_t restored_lockout_remaining_ms,
+             uint32_t now_ms);
 
 void ui_set_clock_trusted(ui_ctx_t *ctx, bool trusted);
 

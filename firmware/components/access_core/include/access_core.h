@@ -33,7 +33,7 @@ extern "C" {
 
 /* Password policy, format_version 1 (mirrors the DB column). */
 #define AC_REQUIRED_DIGITS 6
-#define AC_MIN_LETTERS 2 /* from A-D */
+#define AC_MIN_LETTERS 2  /* from A-D */
 #define AC_MIN_SPECIALS 1 /* from * # */
 #define AC_MAX_CODE_LEN 16
 

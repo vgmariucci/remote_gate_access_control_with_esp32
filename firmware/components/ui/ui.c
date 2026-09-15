@@ -2,8 +2,7 @@
 
 #include <string.h>
 
-static uint16_t permille_remaining(uint32_t now_ms, uint32_t deadline_ms,
-                                   uint32_t span_ms)
+static uint16_t permille_remaining(uint32_t now_ms, uint32_t deadline_ms, uint32_t span_ms)
 {
     if (span_ms == 0 || (int32_t)(deadline_ms - now_ms) <= 0) {
         return 0;
@@ -23,17 +22,16 @@ static void go_idle(ui_ctx_t *ctx)
     ctx->screen_until_ms = 0;
 }
 
-void ui_init(ui_ctx_t *ctx, uint8_t restored_attempts,
-             uint32_t restored_lockout_remaining_ms, uint32_t now_ms)
+void ui_init(ui_ctx_t *ctx, uint8_t restored_attempts, uint32_t restored_lockout_remaining_ms,
+             uint32_t now_ms)
 {
     if (!ctx) {
         return;
     }
     memset(ctx, 0, sizeof(*ctx));
     ctx->clock_trusted = false;
-    ctx->attempts_used = restored_attempts > UI_MAX_ATTEMPTS
-                             ? UI_MAX_ATTEMPTS
-                             : restored_attempts;
+    ctx->attempts_used =
+        restored_attempts > UI_MAX_ATTEMPTS ? UI_MAX_ATTEMPTS : restored_attempts;
 
     if (restored_lockout_remaining_ms > 0) {
         ctx->lockout_until_ms = now_ms + restored_lockout_remaining_ms;
@@ -180,8 +178,7 @@ ui_action_t ui_tick(ui_ctx_t *ctx, uint32_t now_ms)
         return UI_ACTION_NONE;
     }
 
-    if (ctx->screen_until_ms != 0 &&
-        (int32_t)(ctx->screen_until_ms - now_ms) <= 0) {
+    if (ctx->screen_until_ms != 0 && (int32_t)(ctx->screen_until_ms - now_ms) <= 0) {
         go_idle(ctx);
     }
     return UI_ACTION_NONE;
@@ -199,11 +196,10 @@ ui_render_t ui_render(const ui_ctx_t *ctx, uint32_t now_ms)
     r.attempts_used = ctx->attempts_used;
 
     if (ctx->screen == UI_SCREEN_ENTRY) {
-        r.progress_permille = permille_remaining(now_ms, ctx->entry_deadline_ms,
-                                                 UI_ENTRY_TIMEOUT_MS);
+        r.progress_permille =
+            permille_remaining(now_ms, ctx->entry_deadline_ms, UI_ENTRY_TIMEOUT_MS);
     } else if (ctx->screen == UI_SCREEN_LOCKOUT) {
-        r.progress_permille = permille_remaining(now_ms, ctx->lockout_until_ms,
-                                                 UI_LOCKOUT_MS);
+        r.progress_permille = permille_remaining(now_ms, ctx->lockout_until_ms, UI_LOCKOUT_MS);
         int32_t left = (int32_t)(ctx->lockout_until_ms - now_ms);
         r.seconds_remaining = left > 0 ? (uint32_t)((left + 999) / 1000) : 0;
     }

@@ -29,8 +29,8 @@ static void fake_hash(uint8_t out[AC_HASH_LEN], uint8_t seed)
 
 TEST_CASE("format: canonical valid codes are accepted", "[access_core]")
 {
-    TEST_ASSERT_TRUE(ac_format_valid("123456AB*"));  /* minimum length, 9 */
-    TEST_ASSERT_TRUE(ac_format_valid("1A2B3*456"));  /* interleaved */
+    TEST_ASSERT_TRUE(ac_format_valid("123456AB*"));   /* minimum length, 9 */
+    TEST_ASSERT_TRUE(ac_format_valid("1A2B3*456"));   /* interleaved */
     TEST_ASSERT_TRUE(ac_format_valid("#DDCC009182")); /* extra letters and specials */
 }
 
@@ -42,9 +42,9 @@ TEST_CASE("format: wrong digit count is rejected", "[access_core]")
 
 TEST_CASE("format: letter and special minimums are enforced", "[access_core]")
 {
-    TEST_ASSERT_FALSE(ac_format_valid("123456A*"));  /* only 1 letter */
-    TEST_ASSERT_FALSE(ac_format_valid("123456AB"));  /* no special */
-    TEST_ASSERT_FALSE(ac_format_valid("123456"));    /* digits only */
+    TEST_ASSERT_FALSE(ac_format_valid("123456A*")); /* only 1 letter */
+    TEST_ASSERT_FALSE(ac_format_valid("123456AB")); /* no special */
+    TEST_ASSERT_FALSE(ac_format_valid("123456"));   /* digits only */
 }
 
 TEST_CASE("format: characters absent from a 4x4 keypad are rejected", "[access_core]")

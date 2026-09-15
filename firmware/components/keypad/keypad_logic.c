@@ -1,11 +1,10 @@
 #include "keypad_logic.h"
 
+/* clang-format off */
 static const char KP_MAP[KP_KEYS] = {
-    '1', '2', '3', 'A',
-    '4', '5', '6', 'B',
-    '7', '8', '9', 'C',
-    '*', '0', '#', 'D',
+    '1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D',
 };
+/* clang-format on */
 
 char kp_index_to_char(int index)
 {
@@ -50,8 +49,8 @@ void kp_logic_init(kp_logic_t *st)
     st->ghost_blocked = false;
 }
 
-size_t kp_logic_update(kp_logic_t *st, uint16_t raw, uint32_t now_ms,
-                       kp_event_t *out, size_t out_cap)
+size_t kp_logic_update(kp_logic_t *st, uint16_t raw, uint32_t now_ms, kp_event_t *out,
+                       size_t out_cap)
 {
     size_t n = 0;
     if (!st || !out || out_cap == 0) {
