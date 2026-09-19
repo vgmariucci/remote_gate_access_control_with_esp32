@@ -1,12 +1,16 @@
 # ESP-IDF build output
-firmware/build/
-firmware/host_test/build/
+build/
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/host_test/sdkconfig
 firmware/host_test/sdkconfig.old
 firmware/dependencies.lock
 managed_components/
+
+# clangd index, generated per machine
+.clangd
+compile_commands.json
+.cache/
 
 # Secrets. Never commit a bot token, an HMAC key or a device salt.
 .env
@@ -17,7 +21,6 @@ secrets/
 *.key
 
 # Editors
-.vscode/settings.json
 .idea/
 *.swp
 .DS_Store
