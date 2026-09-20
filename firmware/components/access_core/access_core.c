@@ -34,6 +34,25 @@ void ac_restore_attempts(ac_ctx_t *ctx, uint8_t failed_attempts, int64_t lockout
     ctx->lockout_until = lockout_until;
 }
 
+bool ac_is_locked_out(const ac_ctx_t *ctx, int64_t now)
+{
+    return ctx != NULL && ctx->lockout_until > now;
+}
+
+/* Lifts an expired lockout and clears the counter with it. Called from
+ * the main loop and from ac_evaluate, so the UI sees the lift without
+ * needing a keypress to trigger it. */
+void ac_tick(ac_ctx_t *ctx, int64_t now)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    if (ctx->lockout_until != 0 && ctx->lockout_until <= now) {
+        ctx->lockout_until = 0;
+        ctx->failed_attempts = 0;
+    }
+}
+
 void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds)
 {
     if (ctx == NULL) {
@@ -156,7 +175,6 @@ static void register_failure(ac_ctx_t *ctx, int64_t now)
     }
     if (ctx->max_failed_attempts > 0 && ctx->failed_attempts >= ctx->max_failed_attempts) {
         ctx->lockout_until = now + ctx->lockout_seconds;
-        ctx->failed_attempts = 0;
     }
 }
 
@@ -174,7 +192,8 @@ ac_result_t ac_evaluate(ac_ctx_t *ctx, const uint8_t hash[AC_HASH_LEN], int64_t 
         return AC_DENIED_NO_CLOCK;
     }
 
-    if (ctx->lockout_until > now) {
+    ac_tick(ctx, now);
+    if (ac_is_locked_out(ctx, now)) {
         return AC_DENIED_LOCKOUT;
     }
 

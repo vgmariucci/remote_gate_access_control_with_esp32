@@ -83,6 +83,14 @@ void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds
  * becomes unlimited. */
 void ac_restore_attempts(ac_ctx_t *ctx, uint8_t failed_attempts, int64_t lockout_until);
 
+/* Lifts an expired lockout and clears the counter with it. Call from
+ * the main loop so the display sees the lift without needing a
+ * keypress to trigger it. */
+void ac_tick(ac_ctx_t *ctx, int64_t now);
+
+/* Pure query: true while the lockout deadline is still in the future. */
+bool ac_is_locked_out(const ac_ctx_t *ctx, int64_t now);
+
 /* True when `code` satisfies format_version 1. NULL-safe. */
 bool ac_format_valid(const char *code);
 

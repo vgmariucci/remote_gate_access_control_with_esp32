@@ -1,50 +1,80 @@
 /*
  * Unity tests for the guest-facing state machine.
  *
- * The security-relevant assertions are the ones about what does NOT
- * happen: the buffer length never reaches the renderer, an expired code
- * does not burn an attempt, and the lockout survives a restart.
+ * Since ADR 0004 the ui owns no attempt counter, so every case drives a
+ * real ac_ctx_t. That is deliberate: these tests now exercise the same
+ * state the gate actually enforces, rather than a display-side copy
+ * that could agree with the tests and disagree with the lock.
  */
 #include "ui.h"
 #include "unity.h"
 
 static ui_ctx_t ctx;
+static ac_ctx_t ac;
+static uint8_t good_hash[AC_HASH_LEN];
+static uint8_t bad_hash[AC_HASH_LEN];
 
-static void press_n(uint32_t *t, int n)
+#define T0 1773360000LL
+#define DAY 86400LL
+#define MAXF 5
+#define LOCK_S 300
+
+static ui_now_t at(uint32_t ms, int64_t epoch)
+{
+    ui_now_t n = {.ms = ms, .epoch = epoch};
+    return n;
+}
+
+/* No global setUp(): three suites link into one host binary. */
+static void ui_fixture(void)
+{
+    for (int i = 0; i < AC_HASH_LEN; i++) {
+        good_hash[i] = (uint8_t)(1 + i);
+        bad_hash[i] = (uint8_t)(200 + i);
+    }
+    ac_init(&ac, MAXF, LOCK_S);
+    ac.clock_trusted = true;
+    ac_upsert(&ac, "guest001", good_hash, T0, T0 + DAY);
+
+    ui_init(&ctx);
+    ui_set_clock_trusted(&ctx, true);
+}
+
+/* Drives real denials through access_core so the counter is genuine. */
+static void fail_n(int n, int64_t epoch)
 {
     for (int i = 0; i < n; i++) {
-        ui_on_key(&ctx, *t);
-        *t += 400;
+        ac_result_t r = ac_evaluate(&ac, bad_hash, epoch, NULL);
+        ui_on_result(&ctx, &ac, r, at(0, epoch));
     }
 }
 
-/* Not setUp(): three suites link into one host binary, so a global
- * setUp() would be defined three times. Each case calls this itself. */
-static void ui_fixture(void)
+static void press_n(uint32_t *ms, int n)
 {
-    ui_init(&ctx, 0, 0, 0);
-    ui_set_clock_trusted(&ctx, true);
+    for (int i = 0; i < n; i++) {
+        ui_on_key(&ctx, &ac, at(*ms, T0));
+        *ms += 400;
+    }
 }
 
 TEST_CASE("boot without trusted time refuses everything", "[ui]")
 {
     ui_fixture();
-    ui_init(&ctx, 0, 0, 0);
-    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, 0).screen);
-    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, 10));
-    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, 20).screen);
+    ui_init(&ctx); /* clock_trusted back to false */
+    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(0, T0)).screen);
+    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(10, T0)));
+    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(20, T0)).screen);
 }
 
 TEST_CASE("the render payload never carries the entry length", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    press_n(&t, 4);
-    ui_render_t r = ui_render(&ctx, t);
+    uint32_t ms = 0;
+    press_n(&ms, 4);
+    ui_render_t r = ui_render(&ctx, &ac, at(ms, T0));
     TEST_ASSERT_EQUAL(UI_SCREEN_ENTRY, r.screen);
     /* Only a countdown and an attempt count are exposed. If a future
-     * change adds a length field here, this test should be the thing
-     * that stops it. */
+     * change adds a length field here, this test should stop it. */
     TEST_ASSERT_EQUAL_UINT8(0, r.attempts_used);
     TEST_ASSERT_EQUAL_UINT32(0, r.seconds_remaining);
 }
@@ -52,188 +82,178 @@ TEST_CASE("the render payload never carries the entry length", "[ui]")
 TEST_CASE("each keypress refills the countdown bar", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    ui_on_key(&ctx, t);
-    TEST_ASSERT_EQUAL_UINT16(1000, ui_render(&ctx, t).progress_permille);
+    ui_on_key(&ctx, &ac, at(0, T0));
+    TEST_ASSERT_EQUAL_UINT16(1000, ui_render(&ctx, &ac, at(0, T0)).progress_permille);
+    TEST_ASSERT_EQUAL_UINT16(500, ui_render(&ctx, &ac, at(5000, T0)).progress_permille);
 
-    t += 5000;
-    TEST_ASSERT_EQUAL_UINT16(500, ui_render(&ctx, t).progress_permille);
-
-    ui_on_key(&ctx, t); /* the visible reset is the press feedback */
-    TEST_ASSERT_EQUAL_UINT16(1000, ui_render(&ctx, t).progress_permille);
+    ui_on_key(&ctx, &ac, at(5000, T0)); /* the visible reset is the feedback */
+    TEST_ASSERT_EQUAL_UINT16(1000, ui_render(&ctx, &ac, at(5000, T0)).progress_permille);
 }
 
 TEST_CASE("the ninth key submits", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
+    uint32_t ms = 0;
     for (int i = 0; i < UI_CODE_LEN - 1; i++) {
-        TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, t));
-        t += 300;
+        TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(ms, T0)));
+        ms += 300;
     }
-    TEST_ASSERT_EQUAL(UI_ACTION_SUBMIT, ui_on_key(&ctx, t));
+    TEST_ASSERT_EQUAL(UI_ACTION_SUBMIT, ui_on_key(&ctx, &ac, at(ms, T0)));
 }
 
 TEST_CASE("ten seconds of silence abandons the entry", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    press_n(&t, 3);
-    TEST_ASSERT_EQUAL(UI_SCREEN_ENTRY, ui_render(&ctx, t).screen);
+    uint32_t ms = 0;
+    press_n(&ms, 3);
+    TEST_ASSERT_EQUAL(UI_SCREEN_ENTRY, ui_render(&ctx, &ac, at(ms, T0)).screen);
 
-    t += UI_ENTRY_TIMEOUT_MS;
-    TEST_ASSERT_EQUAL(UI_ACTION_CLEAR_BUFFER, ui_tick(&ctx, t));
-    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, ui_render(&ctx, t).screen);
+    ms += UI_ENTRY_TIMEOUT_MS;
+    TEST_ASSERT_EQUAL(UI_ACTION_CLEAR_BUFFER, ui_tick(&ctx, &ac, at(ms, T0)));
+    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, ui_render(&ctx, &ac, at(ms, T0)).screen);
     /* An abandoned entry is not a wrong guess. */
-    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, t).attempts_used);
+    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, &ac, at(ms, T0)).attempts_used);
 }
 
 TEST_CASE("long press clears immediately", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    press_n(&t, 5);
-    TEST_ASSERT_EQUAL(UI_ACTION_CLEAR_BUFFER, ui_on_long_press(&ctx, t));
-    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, ui_render(&ctx, t).screen);
+    uint32_t ms = 0;
+    press_n(&ms, 5);
+    TEST_ASSERT_EQUAL(UI_ACTION_CLEAR_BUFFER, ui_on_long_press(&ctx, &ac, at(ms, T0)));
+    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, ui_render(&ctx, &ac, at(ms, T0)).screen);
 
-    /* And the next nine presses submit, proving the counter really reset. */
+    /* The next nine presses submit, proving the counter really reset. */
     for (int i = 0; i < UI_CODE_LEN - 1; i++) {
-        TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, t));
-        t += 100;
+        TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(ms, T0)));
+        ms += 100;
     }
-    TEST_ASSERT_EQUAL(UI_ACTION_SUBMIT, ui_on_key(&ctx, t));
+    TEST_ASSERT_EQUAL(UI_ACTION_SUBMIT, ui_on_key(&ctx, &ac, at(ms, T0)));
 }
 
 TEST_CASE("granted shows OK for three seconds then returns to idle", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 1000;
-    ui_on_result(&ctx, AC_GRANTED, t);
-    TEST_ASSERT_EQUAL(UI_SCREEN_GRANTED, ui_render(&ctx, t).screen);
+    ac_result_t r = ac_evaluate(&ac, good_hash, T0, NULL);
+    TEST_ASSERT_EQUAL(AC_GRANTED, r);
+    ui_on_result(&ctx, &ac, r, at(1000, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_GRANTED, ui_render(&ctx, &ac, at(1000, T0)).screen);
 
-    ui_tick(&ctx, t + UI_GRANTED_MS - 1);
-    TEST_ASSERT_EQUAL(UI_SCREEN_GRANTED, ui_render(&ctx, t + UI_GRANTED_MS - 1).screen);
+    ui_tick(&ctx, &ac, at(1000 + UI_GRANTED_MS - 1, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_GRANTED,
+                      ui_render(&ctx, &ac, at(1000 + UI_GRANTED_MS - 1, T0)).screen);
 
-    ui_tick(&ctx, t + UI_GRANTED_MS);
-    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, ui_render(&ctx, t + UI_GRANTED_MS).screen);
+    ui_tick(&ctx, &ac, at(1000 + UI_GRANTED_MS, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE,
+                      ui_render(&ctx, &ac, at(1000 + UI_GRANTED_MS, T0)).screen);
 }
 
-TEST_CASE("wrong codes count up to five then lock out", "[ui]")
+TEST_CASE("wrong codes count up to the maximum then lock out", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    for (int i = 1; i <= 4; i++) {
-        ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
-        ui_render_t r = ui_render(&ctx, t);
+    for (int i = 1; i < MAXF; i++) {
+        fail_n(1, T0);
+        ui_render_t r = ui_render(&ctx, &ac, at(0, T0));
         TEST_ASSERT_EQUAL(UI_SCREEN_DENIED, r.screen);
         TEST_ASSERT_EQUAL_UINT8(i, r.attempts_used);
-        t += UI_DENIED_MS;
-        ui_tick(&ctx, t);
+        TEST_ASSERT_EQUAL_UINT8(MAXF, r.attempts_max);
+        ui_tick(&ctx, &ac, at(UI_DENIED_MS, T0));
     }
 
-    ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
-    ui_render_t r = ui_render(&ctx, t);
+    fail_n(1, T0);
+    ui_render_t r = ui_render(&ctx, &ac, at(0, T0));
     TEST_ASSERT_EQUAL(UI_SCREEN_LOCKOUT, r.screen);
-    TEST_ASSERT_EQUAL_UINT8(UI_MAX_ATTEMPTS, r.attempts_used);
-    TEST_ASSERT_EQUAL_UINT32(300, r.seconds_remaining);
-    TEST_ASSERT_TRUE(ui_is_locked_out(&ctx, t));
+    /* The counter is no longer zeroed on arming, so the display can
+     * honestly show "5 of 5" while the lockout runs. */
+    TEST_ASSERT_EQUAL_UINT8(MAXF, r.attempts_used);
+    TEST_ASSERT_EQUAL_UINT32(LOCK_S, r.seconds_remaining);
 }
 
 TEST_CASE("the keypad is inert during lockout", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    uint32_t locked_at = 0;
-    for (int i = 0; i < UI_MAX_ATTEMPTS; i++) {
-        locked_at = t; /* the fifth denial is what arms the lockout */
-        ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
-        t += UI_DENIED_MS;
-        ui_tick(&ctx, t);
-    }
-    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, t + 1000));
-    TEST_ASSERT_EQUAL(UI_SCREEN_LOCKOUT, ui_render(&ctx, t + 1000).screen);
+    fail_n(MAXF, T0);
+    TEST_ASSERT_TRUE(ac_is_locked_out(&ac, T0));
 
-    /* The bar measures from when the lockout was armed, not from the
-     * last tick. Halfway through, it is half full. */
+    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(1000, T0)));
+    TEST_ASSERT_EQUAL(UI_SCREEN_LOCKOUT, ui_render(&ctx, &ac, at(1000, T0)).screen);
+
+    /* Halfway through, the bar is half full. */
     TEST_ASSERT_EQUAL_UINT16(500,
-                             ui_render(&ctx, locked_at + UI_LOCKOUT_MS / 2).progress_permille);
-    TEST_ASSERT_EQUAL_UINT16(0, ui_render(&ctx, locked_at + UI_LOCKOUT_MS).progress_permille);
+                             ui_render(&ctx, &ac, at(0, T0 + LOCK_S / 2)).progress_permille);
+    TEST_ASSERT_EQUAL_UINT16(0, ui_render(&ctx, &ac, at(0, T0 + LOCK_S)).progress_permille);
 }
 
 TEST_CASE("lockout releases and clears the counter", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    for (int i = 0; i < UI_MAX_ATTEMPTS; i++) {
-        ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
-        t += UI_DENIED_MS;
-        ui_tick(&ctx, t);
-    }
-    uint32_t after = t + UI_LOCKOUT_MS + 1;
-    ui_tick(&ctx, after);
-    TEST_ASSERT_FALSE(ui_is_locked_out(&ctx, after));
-    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, ui_render(&ctx, after).screen);
-    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, after).attempts_used);
+    fail_n(MAXF, T0);
+    int64_t after = T0 + LOCK_S + 1;
+
+    ac_tick(&ac, after); /* main loop lifts it without needing a keypress */
+    ui_tick(&ctx, &ac, at(0, after));
+
+    TEST_ASSERT_FALSE(ac_is_locked_out(&ac, after));
+    ui_render_t r = ui_render(&ctx, &ac, at(0, after));
+    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, r.screen);
+    TEST_ASSERT_EQUAL_UINT8(0, r.attempts_used);
 }
 
 TEST_CASE("a lockout restored from RTC SRAM still holds", "[ui]")
 {
     ui_fixture();
     /* Power was cut 100 s into a 300 s lockout. The DS3232 kept the
-     * counter, so the reboot must not hand the attacker a clean slate. */
-    ui_init(&ctx, 5, 200000, 0);
+     * deadline as an absolute epoch, so the reboot must not hand the
+     * attacker a clean slate. */
+    ac_init(&ac, MAXF, LOCK_S);
+    ac.clock_trusted = true;
+    ac_restore_attempts(&ac, MAXF, T0 + 200);
+    ui_init(&ctx);
     ui_set_clock_trusted(&ctx, true);
-    TEST_ASSERT_TRUE(ui_is_locked_out(&ctx, 0));
-    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, 100));
-    TEST_ASSERT_EQUAL_UINT32(200, ui_render(&ctx, 0).seconds_remaining);
+
+    TEST_ASSERT_TRUE(ac_is_locked_out(&ac, T0));
+    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(100, T0)));
+    ui_render_t r = ui_render(&ctx, &ac, at(0, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_LOCKOUT, r.screen);
+    TEST_ASSERT_EQUAL_UINT32(200, r.seconds_remaining);
 }
 
 TEST_CASE("a genuine code outside its window costs no attempt", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    ui_on_result(&ctx, AC_DENIED_NOT_YET, t);
-    TEST_ASSERT_EQUAL(UI_SCREEN_NOT_YET, ui_render(&ctx, t).screen);
-    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, t).attempts_used);
-
-    t += UI_INFO_MS;
-    ui_tick(&ctx, t);
-
-    ui_on_result(&ctx, AC_DENIED_EXPIRED, t);
-    TEST_ASSERT_EQUAL(UI_SCREEN_EXPIRED, ui_render(&ctx, t).screen);
-    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, t).attempts_used);
+    ac_revoke(&ac, "guest001");
+    ac_upsert(&ac, "early001", good_hash, T0 + DAY, T0 + 2 * DAY);
 
     /* Ten early arrivals must not lock the real guest out. */
     for (int i = 0; i < 10; i++) {
-        ui_on_result(&ctx, AC_DENIED_NOT_YET, t);
-        t += UI_INFO_MS;
-        ui_tick(&ctx, t);
+        ac_result_t r = ac_evaluate(&ac, good_hash, T0, NULL);
+        TEST_ASSERT_EQUAL(AC_DENIED_NOT_YET, r);
+        ui_on_result(&ctx, &ac, r, at(0, T0));
+        TEST_ASSERT_EQUAL(UI_SCREEN_NOT_YET, ui_render(&ctx, &ac, at(0, T0)).screen);
+        TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, &ac, at(0, T0)).attempts_used);
+        ui_tick(&ctx, &ac, at(UI_INFO_MS, T0));
     }
-    TEST_ASSERT_FALSE(ui_is_locked_out(&ctx, t));
+    TEST_ASSERT_FALSE(ac_is_locked_out(&ac, T0));
 }
 
 TEST_CASE("a success wipes the accumulated attempts", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
-    t += UI_DENIED_MS;
-    ui_tick(&ctx, t);
-    ui_on_result(&ctx, AC_DENIED_UNKNOWN, t);
-    t += UI_DENIED_MS;
-    ui_tick(&ctx, t);
-    TEST_ASSERT_EQUAL_UINT8(2, ui_render(&ctx, t).attempts_used);
+    fail_n(2, T0);
+    TEST_ASSERT_EQUAL_UINT8(2, ui_render(&ctx, &ac, at(0, T0)).attempts_used);
 
-    ui_on_result(&ctx, AC_GRANTED, t);
-    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, t).attempts_used);
+    ac_result_t r = ac_evaluate(&ac, good_hash, T0, NULL);
+    TEST_ASSERT_EQUAL(AC_GRANTED, r);
+    ui_on_result(&ctx, &ac, r, at(0, T0));
+    TEST_ASSERT_EQUAL_UINT8(0, ui_render(&ctx, &ac, at(0, T0)).attempts_used);
 }
 
 TEST_CASE("losing trusted time mid-entry fails closed", "[ui]")
 {
     ui_fixture();
-    uint32_t t = 0;
-    press_n(&t, 6);
+    uint32_t ms = 0;
+    press_n(&ms, 6);
     ui_set_clock_trusted(&ctx, false);
-    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, t).screen);
-    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, t + 100));
+    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(ms, T0)).screen);
+    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(ms + 100, T0)));
 }
