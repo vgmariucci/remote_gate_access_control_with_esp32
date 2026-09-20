@@ -277,3 +277,22 @@ TEST_CASE("lockout: a genuine code outside its window costs no attempt", "[acces
     TEST_ASSERT_EQUAL(AC_DENIED_UNKNOWN, ac_evaluate(&ctx, bad, T0, NULL));
     TEST_ASSERT_EQUAL(AC_DENIED_LOCKOUT, ac_evaluate(&ctx, h, T0, NULL));
 }
+
+TEST_CASE("lockout: the counter stays at max while the lockout runs", "[access_core]")
+{
+    ac_ctx_t ctx;
+    uint8_t bad[AC_HASH_LEN];
+    fake_hash(bad, 50);
+
+    ac_init(&ctx, 3, 60);
+    ctx.clock_trusted = true;
+    for (int i = 0; i < 3; i++) {
+        ac_evaluate(&ctx, bad, T0, NULL);
+    }
+    /* Zeroed here before ADR 0004; the display needs it kept. */
+    TEST_ASSERT_EQUAL_UINT8(3, ctx.failed_attempts);
+
+    ac_tick(&ctx, T0 + 61);
+    TEST_ASSERT_EQUAL_UINT8(0, ctx.failed_attempts);
+    TEST_ASSERT_FALSE(ac_is_locked_out(&ctx, T0 + 61));
+}
