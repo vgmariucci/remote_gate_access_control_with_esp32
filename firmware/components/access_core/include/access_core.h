@@ -31,11 +31,13 @@ extern "C" {
 #define AC_MAX_SLOTS 16 /* concurrent guests per gate; fixed => no heap */
 #define AC_ID_LEN 9     /* 8 hex chars + NUL, matches access_code.id prefix */
 
-/* Password policy, format_version 1 (mirrors the DB column). */
+/* Password policy, format_version 1 (mirrors the DB column).
+ * Fixed at 9 characters so the controller knows entry is complete the
+ * moment the buffer fills — no Enter key, no terminating timeout. */
+#define AC_CODE_LEN 9
 #define AC_REQUIRED_DIGITS 6
-#define AC_MIN_LETTERS 2  /* from A-D */
-#define AC_MIN_SPECIALS 1 /* from * # */
-#define AC_MAX_CODE_LEN 16
+#define AC_REQUIRED_LETTERS 2  /* from A-D */
+#define AC_REQUIRED_SPECIALS 1 /* from * # */
 
 typedef enum {
     AC_GRANTED = 0,
@@ -75,6 +77,11 @@ typedef struct {
 
 /* Zeroes the table and applies the lockout policy. */
 void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds);
+
+/* Rehydrates the failure counter from battery-backed storage at boot.
+ * Without this, cutting power resets the lockout and five attempts
+ * becomes unlimited. */
+void ac_restore_attempts(ac_ctx_t *ctx, uint8_t failed_attempts, int64_t lockout_until);
 
 /* True when `code` satisfies format_version 1. NULL-safe. */
 bool ac_format_valid(const char *code);

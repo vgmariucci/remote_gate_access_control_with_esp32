@@ -29,9 +29,9 @@ static void fake_hash(uint8_t out[AC_HASH_LEN], uint8_t seed)
 
 TEST_CASE("format: canonical valid codes are accepted", "[access_core]")
 {
-    TEST_ASSERT_TRUE(ac_format_valid("123456AB*"));   /* minimum length, 9 */
-    TEST_ASSERT_TRUE(ac_format_valid("1A2B3*456"));   /* interleaved */
-    TEST_ASSERT_TRUE(ac_format_valid("#DDCC009182")); /* extra letters and specials */
+    TEST_ASSERT_TRUE(ac_format_valid("123456AB*")); /* minimum length, 9 */
+    TEST_ASSERT_TRUE(ac_format_valid("1A2B3*456")); /* interleaved */
+    TEST_ASSERT_TRUE(ac_format_valid("*DD123456")); /* extra letters and specials */
 }
 
 TEST_CASE("format: wrong digit count is rejected", "[access_core]")
@@ -40,11 +40,13 @@ TEST_CASE("format: wrong digit count is rejected", "[access_core]")
     TEST_ASSERT_FALSE(ac_format_valid("1234567AB*")); /* 7 digits */
 }
 
-TEST_CASE("format: letter and special minimums are enforced", "[access_core]")
+TEST_CASE("format: length is exactly nine", "[access_core]")
 {
-    TEST_ASSERT_FALSE(ac_format_valid("123456A*")); /* only 1 letter */
-    TEST_ASSERT_FALSE(ac_format_valid("123456AB")); /* no special */
-    TEST_ASSERT_FALSE(ac_format_valid("123456"));   /* digits only */
+    TEST_ASSERT_FALSE(ac_format_valid("123456A*"));    /* only 1 letter */
+    TEST_ASSERT_FALSE(ac_format_valid("123456AB"));    /* no special */
+    TEST_ASSERT_FALSE(ac_format_valid("123456"));      /* digits only */
+    TEST_ASSERT_FALSE(ac_format_valid("123456AB*7"));  /* 10 digits */
+    TEST_ASSERT_FALSE(ac_format_valid("#DDCC009182")); /* 11 digits */
 }
 
 TEST_CASE("format: characters absent from a 4x4 keypad are rejected", "[access_core]")
@@ -254,17 +256,24 @@ TEST_CASE("lockout: a success clears the failure counter", "[access_core]")
     TEST_ASSERT_EQUAL(AC_GRANTED, ac_evaluate(&ctx, good, T0, NULL));
 }
 
-TEST_CASE("lockout: an expired code still counts as a failure", "[access_core]")
+TEST_CASE("lockout: a genuine code outside its window costs no attempt", "[access_core]")
 {
     ac_ctx_t ctx;
-    uint8_t h[AC_HASH_LEN];
+    uint8_t h[AC_HASH_LEN], bad[AC_HASH_LEN];
     fake_hash(h, 40);
+    fake_hash(bad, 41);
 
     ac_init(&ctx, 2, 60);
     ctx.clock_trusted = true;
     ac_upsert(&ctx, "lock0003", h, T0 - 2 * DAY, T0 - DAY);
 
-    TEST_ASSERT_EQUAL(AC_DENIED_EXPIRED, ac_evaluate(&ctx, h, T0, NULL));
-    TEST_ASSERT_EQUAL(AC_DENIED_EXPIRED, ac_evaluate(&ctx, h, T0, NULL));
+    /* A real credential presented outside its window is a scheduling
+     * problem, not a guess. Ten tries must not lock the gate. */
+    for (int i = 0; i < 10; i++) {
+        TEST_ASSERT_EQUAL(AC_DENIED_EXPIRED, ac_evaluate(&ctx, h, T0, NULL));
+    }
+    /* Unknown hashes still count, so the lockout is not disabled. */
+    TEST_ASSERT_EQUAL(AC_DENIED_UNKNOWN, ac_evaluate(&ctx, bad, T0, NULL));
+    TEST_ASSERT_EQUAL(AC_DENIED_UNKNOWN, ac_evaluate(&ctx, bad, T0, NULL));
     TEST_ASSERT_EQUAL(AC_DENIED_LOCKOUT, ac_evaluate(&ctx, h, T0, NULL));
 }

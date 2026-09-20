@@ -25,6 +25,15 @@ static int find_by_id(const ac_ctx_t *ctx, const char *id)
     return -1;
 }
 
+void ac_restore_attempts(ac_ctx_t *ctx, uint8_t failed_attempts, int64_t lockout_until)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    ctx->failed_attempts = failed_attempts;
+    ctx->lockout_until = lockout_until;
+}
+
 void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds)
 {
     if (ctx == NULL) {
@@ -46,7 +55,7 @@ bool ac_format_valid(const char *code)
 
     for (const char *p = code; *p != '\0'; p++) {
         len++;
-        if (len > AC_MAX_CODE_LEN) {
+        if (len > AC_CODE_LEN) {
             return false;
         }
         char c = *p;
@@ -61,8 +70,8 @@ bool ac_format_valid(const char *code)
         }
     }
 
-    return digits == AC_REQUIRED_DIGITS && letters >= AC_MIN_LETTERS &&
-           specials >= AC_MIN_SPECIALS;
+    return len == AC_CODE_LEN && digits == AC_REQUIRED_DIGITS &&
+           letters == AC_REQUIRED_LETTERS && specials == AC_REQUIRED_SPECIALS;
 }
 
 int ac_upsert(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
@@ -185,12 +194,13 @@ ac_result_t ac_evaluate(ac_ctx_t *ctx, const uint8_t hash[AC_HASH_LEN], int64_t 
     }
 
     const ac_slot_t *s = &ctx->slots[match];
+    /* A genuine credential outside its window. The caller already holds
+     * a real code, so this leaks nothing and must not consume an
+     * attempt — an early guest would otherwise lock out the gate. */
     if (now < s->valid_from) {
-        register_failure(ctx, now);
         return AC_DENIED_NOT_YET;
     }
     if (now > s->valid_until) {
-        register_failure(ctx, now);
         return AC_DENIED_EXPIRED;
     }
 
