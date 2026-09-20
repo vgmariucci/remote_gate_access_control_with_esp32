@@ -2,16 +2,22 @@
 
 #include <string.h>
 
-static uint16_t permille_remaining(uint32_t now_ms, uint32_t deadline_ms, uint32_t span_ms)
+static uint16_t permille_remaining_ms(uint32_t now_ms, uint32_t deadline_ms, uint32_t span_ms)
 {
     if (span_ms == 0 || (int32_t)(deadline_ms - now_ms) <= 0) {
         return 0;
     }
     uint32_t remaining = deadline_ms - now_ms;
-    if (remaining >= span_ms) {
-        return 1000;
+    return remaining >= span_ms ? 1000 : (uint16_t)((remaining * 1000u) / span_ms);
+}
+
+static uint16_t permille_remaining_s(int64_t now, int64_t deadline, int32_t span_s)
+{
+    if (span_s <= 0 || deadline <= now) {
+        return 0;
     }
-    return (uint16_t)((remaining * 1000u) / span_ms);
+    int64_t remaining = deadline - now;
+    return remaining >= span_s ? 1000 : (uint16_t)((remaining * 1000) / span_s);
 }
 
 static void go_idle(ui_ctx_t *ctx)
@@ -22,29 +28,19 @@ static void go_idle(ui_ctx_t *ctx)
     ctx->screen_until_ms = 0;
 }
 
-void ui_init(ui_ctx_t *ctx, uint8_t restored_attempts, uint32_t restored_lockout_remaining_ms,
-             uint32_t now_ms)
+void ui_init(ui_ctx_t *ctx)
 {
-    if (!ctx) {
+    if (ctx == NULL) {
         return;
     }
     memset(ctx, 0, sizeof(*ctx));
     ctx->clock_trusted = false;
-    ctx->attempts_used =
-        restored_attempts > UI_MAX_ATTEMPTS ? UI_MAX_ATTEMPTS : restored_attempts;
-
-    if (restored_lockout_remaining_ms > 0) {
-        ctx->lockout_until_ms = now_ms + restored_lockout_remaining_ms;
-        ctx->screen = UI_SCREEN_LOCKOUT;
-    } else {
-        ctx->lockout_until_ms = 0;
-        ctx->screen = UI_SCREEN_NO_CLOCK;
-    }
+    ctx->screen = UI_SCREEN_NO_CLOCK;
 }
 
 void ui_set_clock_trusted(ui_ctx_t *ctx, bool trusted)
 {
-    if (!ctx) {
+    if (ctx == NULL) {
         return;
     }
     ctx->clock_trusted = trusted;
@@ -56,22 +52,15 @@ void ui_set_clock_trusted(ui_ctx_t *ctx, bool trusted)
     }
 }
 
-bool ui_is_locked_out(const ui_ctx_t *ctx, uint32_t now_ms)
+ui_action_t ui_on_key(ui_ctx_t *ctx, const ac_ctx_t *ac, ui_now_t now)
 {
-    if (!ctx || ctx->lockout_until_ms == 0) {
-        return false;
-    }
-    return (int32_t)(ctx->lockout_until_ms - now_ms) > 0;
-}
-
-ui_action_t ui_on_key(ui_ctx_t *ctx, uint32_t now_ms)
-{
-    if (!ctx) {
+    if (ctx == NULL) {
         return UI_ACTION_NONE;
     }
-    /* Locked out or no trusted clock: the keypad is inert. Deliberately
-     * no feedback difference, so probing tells an attacker nothing. */
-    if (ui_is_locked_out(ctx, now_ms) || !ctx->clock_trusted) {
+    /* Inert while locked out or without trusted time. No feedback
+     * difference between the two, so probing tells an attacker
+     * nothing. */
+    if (!ctx->clock_trusted || ac_is_locked_out(ac, now.epoch)) {
         return UI_ACTION_NONE;
     }
 
@@ -83,48 +72,42 @@ ui_action_t ui_on_key(ui_ctx_t *ctx, uint32_t now_ms)
     }
 
     ctx->entry_len++;
-    ctx->entry_deadline_ms = now_ms + UI_ENTRY_TIMEOUT_MS;
+    ctx->entry_deadline_ms = now.ms + UI_ENTRY_TIMEOUT_MS;
 
-    if (ctx->entry_len >= UI_CODE_LEN) {
-        return UI_ACTION_SUBMIT;
-    }
-    return UI_ACTION_NONE;
+    return ctx->entry_len >= UI_CODE_LEN ? UI_ACTION_SUBMIT : UI_ACTION_NONE;
 }
 
-ui_action_t ui_on_long_press(ui_ctx_t *ctx, uint32_t now_ms)
+ui_action_t ui_on_long_press(ui_ctx_t *ctx, const ac_ctx_t *ac, ui_now_t now)
 {
-    if (!ctx || ui_is_locked_out(ctx, now_ms)) {
+    if (ctx == NULL || ac_is_locked_out(ac, now.epoch)) {
         return UI_ACTION_NONE;
     }
     go_idle(ctx);
     return UI_ACTION_CLEAR_BUFFER;
 }
 
-ui_action_t ui_on_result(ui_ctx_t *ctx, ac_result_t result, uint32_t now_ms)
+ui_action_t ui_on_result(ui_ctx_t *ctx, const ac_ctx_t *ac, ac_result_t r, ui_now_t now)
 {
-    if (!ctx) {
+    if (ctx == NULL) {
         return UI_ACTION_NONE;
     }
     ctx->entry_len = 0;
 
-    switch (result) {
+    switch (r) {
     case AC_GRANTED:
-        ctx->attempts_used = 0;
-        ctx->lockout_until_ms = 0;
         ctx->screen = UI_SCREEN_GRANTED;
-        ctx->screen_until_ms = now_ms + UI_GRANTED_MS;
+        ctx->screen_until_ms = now.ms + UI_GRANTED_MS;
         break;
 
-    /* A genuine code outside its window. The person already holds a real
-     * credential, so telling them why costs nothing and saves a call.
-     * It must not consume an attempt. */
+    /* A genuine code outside its window. access_core charged no
+     * attempt for it, so there is nothing to reflect here. */
     case AC_DENIED_NOT_YET:
         ctx->screen = UI_SCREEN_NOT_YET;
-        ctx->screen_until_ms = now_ms + UI_INFO_MS;
+        ctx->screen_until_ms = now.ms + UI_INFO_MS;
         break;
     case AC_DENIED_EXPIRED:
         ctx->screen = UI_SCREEN_EXPIRED;
-        ctx->screen_until_ms = now_ms + UI_INFO_MS;
+        ctx->screen_until_ms = now.ms + UI_INFO_MS;
         break;
 
     case AC_DENIED_NO_CLOCK:
@@ -132,20 +115,15 @@ ui_action_t ui_on_result(ui_ctx_t *ctx, ac_result_t result, uint32_t now_ms)
         ctx->screen_until_ms = 0;
         break;
 
-    case AC_DENIED_UNKNOWN:
-    case AC_DENIED_BAD_FORMAT:
-    case AC_DENIED_LOCKOUT:
-    default:
-        if (ctx->attempts_used < UI_MAX_ATTEMPTS) {
-            ctx->attempts_used++;
-        }
-        if (ctx->attempts_used >= UI_MAX_ATTEMPTS) {
-            ctx->lockout_until_ms = now_ms + UI_LOCKOUT_MS;
-            ctx->screen = UI_SCREEN_LOCKOUT;
-            ctx->screen_until_ms = 0;
+    default: /* UNKNOWN, BAD_FORMAT, LOCKOUT */
+        /* access_core already incremented and may have armed the
+         * lockout. When it did, the lockout screen is derived in
+         * ui_render, so idle is the correct underlying state. */
+        if (ac_is_locked_out(ac, now.epoch)) {
+            go_idle(ctx);
         } else {
             ctx->screen = UI_SCREEN_DENIED;
-            ctx->screen_until_ms = now_ms + UI_DENIED_MS;
+            ctx->screen_until_ms = now.ms + UI_DENIED_MS;
         }
         break;
     }
@@ -153,23 +131,18 @@ ui_action_t ui_on_result(ui_ctx_t *ctx, ac_result_t result, uint32_t now_ms)
     return UI_ACTION_CLEAR_BUFFER;
 }
 
-ui_action_t ui_tick(ui_ctx_t *ctx, uint32_t now_ms)
+ui_action_t ui_tick(ui_ctx_t *ctx, const ac_ctx_t *ac, ui_now_t now)
 {
-    if (!ctx) {
+    if (ctx == NULL) {
         return UI_ACTION_NONE;
     }
-
-    if (ctx->screen == UI_SCREEN_LOCKOUT) {
-        if (!ui_is_locked_out(ctx, now_ms)) {
-            ctx->lockout_until_ms = 0;
-            ctx->attempts_used = 0; /* the lockout was the penalty */
-            go_idle(ctx);
-        }
+    if (ac_is_locked_out(ac, now.epoch)) {
+        ctx->entry_len = 0;
         return UI_ACTION_NONE;
     }
 
     if (ctx->screen == UI_SCREEN_ENTRY) {
-        if ((int32_t)(ctx->entry_deadline_ms - now_ms) <= 0) {
+        if ((int32_t)(ctx->entry_deadline_ms - now.ms) <= 0) {
             /* Silent abandon. Costs no attempt: an incomplete entry is
              * not a wrong guess. */
             go_idle(ctx);
@@ -178,31 +151,41 @@ ui_action_t ui_tick(ui_ctx_t *ctx, uint32_t now_ms)
         return UI_ACTION_NONE;
     }
 
-    if (ctx->screen_until_ms != 0 && (int32_t)(ctx->screen_until_ms - now_ms) <= 0) {
+    if (ctx->screen_until_ms != 0 && (int32_t)(ctx->screen_until_ms - now.ms) <= 0) {
         go_idle(ctx);
     }
     return UI_ACTION_NONE;
 }
 
-ui_render_t ui_render(const ui_ctx_t *ctx, uint32_t now_ms)
+ui_render_t ui_render(const ui_ctx_t *ctx, const ac_ctx_t *ac, ui_now_t now)
 {
     ui_render_t r;
     memset(&r, 0, sizeof(r));
-    if (!ctx) {
+    if (ctx == NULL || ac == NULL) {
+        return r;
+    }
+
+    r.attempts_used = ac->failed_attempts;
+    r.attempts_max = ac->max_failed_attempts;
+
+    if (!ctx->clock_trusted) {
+        r.screen = UI_SCREEN_NO_CLOCK;
+        return r;
+    }
+
+    /* Derived, not stored: one deadline, one owner. */
+    if (ac_is_locked_out(ac, now.epoch)) {
+        r.screen = UI_SCREEN_LOCKOUT;
+        r.progress_permille =
+            permille_remaining_s(now.epoch, ac->lockout_until, ac->lockout_seconds);
+        r.seconds_remaining = (uint32_t)(ac->lockout_until - now.epoch);
         return r;
     }
 
     r.screen = ctx->screen;
-    r.attempts_used = ctx->attempts_used;
-
     if (ctx->screen == UI_SCREEN_ENTRY) {
         r.progress_permille =
-            permille_remaining(now_ms, ctx->entry_deadline_ms, UI_ENTRY_TIMEOUT_MS);
-    } else if (ctx->screen == UI_SCREEN_LOCKOUT) {
-        r.progress_permille = permille_remaining(now_ms, ctx->lockout_until_ms, UI_LOCKOUT_MS);
-        int32_t left = (int32_t)(ctx->lockout_until_ms - now_ms);
-        r.seconds_remaining = left > 0 ? (uint32_t)((left + 999) / 1000) : 0;
+            permille_remaining_ms(now.ms, ctx->entry_deadline_ms, UI_ENTRY_TIMEOUT_MS);
     }
-
     return r;
 }
