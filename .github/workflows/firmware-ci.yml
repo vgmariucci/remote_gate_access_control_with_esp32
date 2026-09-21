@@ -40,6 +40,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build and run the host suite
         shell: bash
         run: |
@@ -63,6 +65,8 @@ jobs:
         target: [esp32s3]
     steps:
       - uses: actions/checkout@v4
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: idf.py build
         shell: bash
         run: |
