@@ -61,9 +61,20 @@ TEST_CASE("boot without trusted time refuses everything", "[ui]")
 {
     ui_fixture();
     ui_init(&ctx); /* clock_trusted back to false */
-    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(0, T0)).screen);
+
+    /* Dark until someone presses a key. */
+    ui_render_t r = ui_render(&ctx, &ac, at(0, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_IDLE, r.screen);
+    TEST_ASSERT_FALSE(r.panel_on);
+
+    /* A press explains itself, briefly, and enters nothing. */
     TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(10, T0)));
-    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(20, T0)).screen);
+    r = ui_render(&ctx, &ac, at(20, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, r.screen);
+    TEST_ASSERT_TRUE(r.panel_on);
+
+    ui_tick(&ctx, &ac, at(10 + UI_INFO_MS, T0));
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(10 + UI_INFO_MS, T0)).panel_on);
 }
 
 TEST_CASE("the render payload never carries the entry length", "[ui]")
@@ -254,6 +265,57 @@ TEST_CASE("losing trusted time mid-entry fails closed", "[ui]")
     uint32_t ms = 0;
     press_n(&ms, 6);
     ui_set_clock_trusted(&ctx, false);
-    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(ms, T0)).screen);
+
+    /* The entry is abandoned and the panel goes dark. */
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(ms, T0)).panel_on);
+
+    /* The next press says why, and still enters nothing. */
     TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(ms + 100, T0)));
+    TEST_ASSERT_EQUAL(UI_SCREEN_NO_CLOCK, ui_render(&ctx, &ac, at(ms + 100, T0)).screen);
+}
+
+TEST_CASE("the panel is dark until someone presses a key", "[ui]")
+{
+    ui_fixture();
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(0, T0)).panel_on);
+
+    /* The first press is the first character, not a wake-up that gets
+     * thrown away: the bar appearing is the confirmation. */
+    TEST_ASSERT_EQUAL(UI_ACTION_NONE, ui_on_key(&ctx, &ac, at(100, T0)));
+    ui_render_t r = ui_render(&ctx, &ac, at(100, T0));
+    TEST_ASSERT_EQUAL(UI_SCREEN_ENTRY, r.screen);
+    TEST_ASSERT_TRUE(r.panel_on);
+
+    /* Abandoned entry: dark again. */
+    ui_tick(&ctx, &ac, at(100 + UI_ENTRY_TIMEOUT_MS, T0));
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(100 + UI_ENTRY_TIMEOUT_MS, T0)).panel_on);
+}
+
+TEST_CASE("every interaction ends with the panel dark", "[ui]")
+{
+    ui_fixture();
+
+    ac_result_t g = ac_evaluate(&ac, good_hash, T0, NULL);
+    ui_on_result(&ctx, &ac, g, at(0, T0));
+    TEST_ASSERT_TRUE(ui_render(&ctx, &ac, at(0, T0)).panel_on);
+    ui_tick(&ctx, &ac, at(UI_GRANTED_MS, T0));
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(UI_GRANTED_MS, T0)).panel_on);
+
+    fail_n(1, T0);
+    TEST_ASSERT_TRUE(ui_render(&ctx, &ac, at(0, T0)).panel_on);
+    ui_tick(&ctx, &ac, at(UI_DENIED_MS, T0));
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(UI_DENIED_MS, T0)).panel_on);
+}
+
+TEST_CASE("a lockout keeps the panel lit only while it runs", "[ui]")
+{
+    ui_fixture();
+    fail_n(MAXF, T0);
+    TEST_ASSERT_TRUE(ui_render(&ctx, &ac, at(0, T0)).panel_on);
+    TEST_ASSERT_TRUE(ui_render(&ctx, &ac, at(0, T0 + LOCK_S - 1)).panel_on);
+
+    int64_t after = T0 + LOCK_S + 1;
+    ac_tick(&ac, after);
+    ui_tick(&ctx, &ac, at(0, after));
+    TEST_ASSERT_FALSE(ui_render(&ctx, &ac, at(0, after)).panel_on);
 }
