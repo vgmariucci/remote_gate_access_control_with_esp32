@@ -10,13 +10,20 @@
  * would not be the one the gate enforces.
  *
  * Display policy:
+ *   - the panel is DARK unless someone is interacting with the keypad
+ *     or a lockout countdown is running. OLED pixels burn in under
+ *     static content, and a gate display is on 24 hours a day, so there
+ *     is no idle prompt. The first keypress is simply the first
+ *     character: the countdown bar appearing is the confirmation.
  *   - the entry buffer is never echoed, not even masked
  *   - a 10 s countdown bar is the only entry feedback; each keypress
  *     snaps it back to full, which confirms the press registered
  *     without revealing how many have been entered
  *   - success: a large OK for 3 s
  *   - failure: attempts used out of max, for 2 s
- *   - lockout: its own countdown, derived from ac_ctx_t
+ *   - no trusted clock: shown for 3 s in response to a keypress only
+ *   - lockout: its own countdown, derived from ac_ctx_t, lit for the
+ *     whole lockout because the guest needs to see when to retry
  *
  * The ui never sees the typed characters. The caller owns that buffer
  * and zeroes it; ui tracks only how many keys have been pressed.
@@ -71,6 +78,7 @@ typedef struct {
     uint8_t attempts_used;      /* read from ac_ctx_t */
     uint8_t attempts_max;       /* read from ac_ctx_t */
     uint32_t seconds_remaining; /* meaningful on LOCKOUT */
+    bool panel_on;              /* false: power the panel down */
 } ui_render_t;
 
 typedef enum {
