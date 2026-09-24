@@ -26,3 +26,23 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # CONFIG_SECURE_FLASH_ENC_ENABLED=y
 # CONFIG_SECURE_BOOT=y
 # CONFIG_NVS_ENCRYPTION=y
+# Append to firmware/sdkconfig.defaults, then `rm sdkconfig` and rebuild.
+#
+# The dev console reads from USB-Serial/JTAG, which is the port you
+# flash and monitor through. Making it the primary console routes the
+# REPL and the logs over that one cable.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# ESP-IDF's FreeRTOS tick rate definition
+CONFIG_FREERTOS_HZ=1000# Append to firmware/sdkconfig.defaults if not already there, then
+#   unset IDF_TARGET; rm -rf build sdkconfig; idf.py set-target esp32s3
+
+# 1 ms tick. At the 100 Hz default, pdMS_TO_TICKS(5) is 0 and the
+# keypad task's vTaskDelayUntil asserts on boot.
+CONFIG_FREERTOS_HZ=1000
+
+# The main task runs the whole loop, including SHA-256.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# The dev console reads from USB-Serial/JTAG.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
