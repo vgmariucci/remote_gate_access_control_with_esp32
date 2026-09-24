@@ -50,6 +50,14 @@ static void keypad_task(void *arg)
     kp_event_t events[KP_MAX_EVENTS];
     TickType_t last_wake = xTaskGetTickCount();
 
+    /* pdMS_TO_TICKS rounds down: 5 ms at a 100 Hz tick is 0, and a zero
+     * delay asserts in xTaskDelayUntil. Clamp to one tick so the scan
+     * period degrades rather than aborting the firmware. */
+    TickType_t period = pdMS_TO_TICKS(s_cfg.scan_period_ms);
+    if (period == 0) {
+        period = 1;
+    }
+
     kp_logic_init(&logic);
 
     while (s_running) {
@@ -66,7 +74,7 @@ static void keypad_task(void *arg)
             }
         }
 
-        xTaskDelayUntil(&last_wake, pdMS_TO_TICKS(s_cfg.scan_period_ms));
+        xTaskDelayUntil(&last_wake, period);
     }
 
     vTaskDelete(NULL);
