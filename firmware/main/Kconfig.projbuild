@@ -1,0 +1,26 @@
+menu "Gate controller"
+
+    config GATE_MAX_FAILED_ATTEMPTS
+        int "Wrong codes before the keypad locks"
+        range 1 20
+        default 5
+
+    config GATE_LOCKOUT_SECONDS
+        int "Lockout duration (seconds)"
+        range 30 3600
+        default 300
+
+    config GATE_DEV_CONSOLE
+        bool "Development console over USB (NEVER in a deployed unit)"
+        default y
+        help
+            Enables a serial shell for bench work: set the clock, add a
+            test code, inspect state, draw the OLED bring-up border.
+
+            It also uses a FIXED, PUBLIC salt for code hashing, so any
+            code added this way is only as secret as this source file.
+            The boot log prints a warning on every start while this is
+            enabled. Turn it off before the unit goes on a door; the
+            provisioning portal replaces it for real configuration.
+
+endmenu
