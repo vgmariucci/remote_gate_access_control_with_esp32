@@ -15,4 +15,5 @@ target_sources(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../components/display_ssd1306/test/test_oled.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/gate_ctrl/test/test_gate_ctrl.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/persist_store/test/test_persist_ring.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../../components/persist_store/test/test_codes.c"
 )

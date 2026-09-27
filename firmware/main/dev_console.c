@@ -73,9 +73,9 @@ static int cmd_code(int argc, char **argv)
             printf("invalid: need exactly 9 characters - 6 digits, 2 of A-D, 1 of * or #\n");
             return 1;
         }
-        long hours = (argc >= 4) ? strtol(argv[3], NULL, 10) : 24;
-        if (hours <= 0 || hours > 24 * 30) {
-            hours = 24;
+        long minutes = (argc >= 4) ? strtol(argv[3], NULL, 10) : 15;
+        if (minutes <= 0 || minutes > 15) {
+            minutes = 15;
         }
 
         uint8_t h[AC_HASH_LEN];
@@ -90,7 +90,7 @@ static int cmd_code(int argc, char **argv)
         gate_app_hash(code, h);
         snprintf(id, sizeof(id), "dev%05u", ++s_dev_codes);
         int64_t now = (int64_t)time(NULL);
-        int slot = ac_upsert(ac, id, h, now - 60, now + (int64_t)hours * 3600);
+        int slot = ac_upsert_transient(ac, id, h, now, now + (int64_t)minutes * 60);
         gate_app_unlock();
         memset(h, 0, sizeof(h));
 
@@ -98,7 +98,8 @@ static int cmd_code(int argc, char **argv)
             printf("table full (%d slots)\n", AC_MAX_SLOTS);
             return 1;
         }
-        printf("added %s, valid for %ld h\n", id, hours);
+        printf("added %s, valid for %ld min (dev code: cleared when the session ends)\n", id,
+               minutes);
         return 0;
     }
 
@@ -180,6 +181,20 @@ static int cmd_i2c(int argc, char **argv)
     return 1;
 }
 
+static int cmd_dev(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "off") == 0) {
+        gate_app_lock();
+        int n = ac_revoke_transient(gate_app_access());
+        gate_app_unlock();
+        s_dev_codes = 0;
+        printf("%d dev code(s) revoked\n", n);
+        return 0;
+    }
+    printf("usage: dev off\n");
+    return 1;
+}
+
 void dev_console_start(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -199,6 +214,7 @@ void dev_console_start(void)
         {.command = "status", .help = "clock, codes, attempts, lock", .func = cmd_status},
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
+        {.command = "dev", .help = "dev off: revoke every dev code", .func = cmd_dev},
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
