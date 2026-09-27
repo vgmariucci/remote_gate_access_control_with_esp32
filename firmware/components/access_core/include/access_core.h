@@ -3,16 +3,15 @@
  *
  * Deliberately free of any ESP-IDF dependency: pure C99, no allocation,
  * no I/O, no time source of its own. Everything here runs identically on
- * the ESP32 and on a GitHub runner, which is what makes milestone 1
- * testable without hardware.
+ * the ESP32 and on a GitHub runner, which is what makes the decision
+ * path testable without hardware.
  *
  * Pipeline the caller is expected to follow:
  *
  *   1. keypad assembles a typed string
- *   2. ac_format_valid()  - cheap reject before spending cycles on sha256
- *   3. caller computes sha256(typed || device_salt)
- *   4. ac_evaluate()      - the decision
- *   5. caller drives the relay and logs the attempt
+ *   2. caller computes sha256(typed || device_salt)
+ *   3. ac_evaluate()      - the decision
+ *   4. caller drives the lock and logs the attempt
  *
  * The plaintext never reaches this module, and never reaches flash.
  */
@@ -27,17 +26,25 @@
 extern "C" {
 #endif
 
-#define AC_HASH_LEN 32  /* sha256 */
-#define AC_MAX_SLOTS 16 /* concurrent guests per gate; fixed => no heap */
-#define AC_ID_LEN 9     /* 8 hex chars + NUL, matches access_code.id prefix */
+#define AC_HASH_LEN 32 /* sha256 */
+#define AC_ID_LEN 9    /* 8 hex chars + NUL, matches access_code.id prefix */
+
+/* Five concurrent codes per gate. RAM and EEPROM hold the same number,
+ * so every persistent code has a home on the chip and "accepted but not
+ * stored" cannot happen. A transient dev code occupies a slot like any
+ * other; when the table is full, the console says so. */
+#define AC_MAX_SLOTS 5
 
 /* Password policy, format_version 1 (mirrors the DB column).
  * Fixed at 9 characters so the controller knows entry is complete the
- * moment the buffer fills — no Enter key, no terminating timeout. */
+ * moment the buffer fills - no Enter key, no terminating timeout. */
 #define AC_CODE_LEN 9
 #define AC_REQUIRED_DIGITS 6
 #define AC_REQUIRED_LETTERS 2  /* from A-D */
 #define AC_REQUIRED_SPECIALS 1 /* from * # */
+
+/* Hard ceiling on a dev code's life, whatever the console asks for. */
+#define AC_TRANSIENT_MAX_S (15 * 60)
 
 typedef enum {
     AC_GRANTED = 0,
@@ -51,6 +58,13 @@ typedef enum {
 
 typedef struct {
     bool occupied;
+
+    /* Transient codes come from a dev session (USB console or AP
+     * portal). They are never written to the EEPROM and are revoked in
+     * bulk when the session ends, so a maintenance code cannot outlive
+     * the maintenance. */
+    bool transient;
+
     char id[AC_ID_LEN];
     uint8_t hash[AC_HASH_LEN];
     int64_t valid_from;  /* unix seconds, UTC */
@@ -60,11 +74,10 @@ typedef struct {
 typedef struct {
     ac_slot_t slots[AC_MAX_SLOTS];
 
-    /* Trusted-time flag. Set by the time module once NTP or the DS3231
-     * has produced a plausible reading. While false, every code is
-     * refused: a controller that cannot tell the time cannot enforce an
-     * expiry, and silently accepting codes would be worse than a locked
-     * gate. */
+    /* Trusted-time flag. Set by the time module once NTP or the RTC has
+     * produced a plausible reading. While false, every code is refused:
+     * a controller that cannot tell the time cannot enforce an expiry,
+     * and silently accepting codes would be worse than a locked gate. */
     bool clock_trusted;
 
     uint8_t failed_attempts;
@@ -78,14 +91,14 @@ typedef struct {
 /* Zeroes the table and applies the lockout policy. */
 void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds);
 
-/* Rehydrates the failure counter from battery-backed storage at boot.
+/* Rehydrates the failure counter from non-volatile storage at boot.
  * Without this, cutting power resets the lockout and five attempts
  * becomes unlimited. */
 void ac_restore_attempts(ac_ctx_t *ctx, uint8_t failed_attempts, int64_t lockout_until);
 
 /* Lifts an expired lockout and clears the counter with it. Call from
- * the main loop so the display sees the lift without needing a
- * keypress to trigger it. */
+ * the main loop so the display sees the lift without needing a keypress
+ * to trigger it. */
 void ac_tick(ac_ctx_t *ctx, int64_t now);
 
 /* Pure query: true while the lockout deadline is still in the future. */
@@ -100,6 +113,17 @@ bool ac_format_valid(const char *code);
 int ac_upsert(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
               int64_t valid_from, int64_t valid_until);
 
+/* As ac_upsert, but the slot is marked transient. `valid_until` is
+ * clamped to valid_from + AC_TRANSIENT_MAX_S: a dev code cannot be
+ * issued with a long life even by mistake. */
+int ac_upsert_transient(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
+                        int64_t valid_from, int64_t valid_until);
+
+/* Removes every transient slot; guest codes are untouched. Returns how
+ * many were removed. Idempotent, because the three end-of-session
+ * triggers may fire in any order. */
+int ac_revoke_transient(ac_ctx_t *ctx);
+
 /* Removes the slot with this id. Returns true when something was removed. */
 bool ac_revoke(ac_ctx_t *ctx, const char *id);
 
@@ -112,8 +136,8 @@ size_t ac_count(const ac_ctx_t *ctx);
 /* The decision. On AC_GRANTED, `out_id` (may be NULL) receives the id of
  * the matching slot so the caller can attribute the attempt.
  *
- * Side effects: bumps failed_attempts and arms the lockout on denial,
- * clears both on success. */
+ * Side effects: bumps failed_attempts and arms the lockout on an
+ * unknown hash, clears both on success. */
 ac_result_t ac_evaluate(ac_ctx_t *ctx, const uint8_t hash[AC_HASH_LEN], int64_t now,
                         char out_id[AC_ID_LEN]);
 

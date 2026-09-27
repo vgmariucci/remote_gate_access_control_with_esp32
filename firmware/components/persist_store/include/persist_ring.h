@@ -30,7 +30,7 @@ extern "C" {
 #endif
 
 #define PR_SLOT_SIZE 32      /* one AT24C32 page: a slot write never straddles pages */
-#define PR_SLOTS 128         /* 4096 / 32 */
+#define PR_SLOTS 64          /* 0x000-0x7FF; the code region owns 0x800 upwards */
 #define PR_MAGIC 0x47415445u /* "GATE" */
 #define PR_VERSION 1
 

@@ -186,6 +186,7 @@ static void boot_persist(i2c_master_bus_handle_t bus)
     } else {
         s_boot_count = 1;
     }
+    persist_codes_load(&s_access);
     persist_attempts(); /* records the boot count */
 }
 
