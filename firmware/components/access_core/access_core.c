@@ -25,6 +25,17 @@ static int find_by_id(const ac_ctx_t *ctx, const char *id)
     return -1;
 }
 
+void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->max_failed_attempts = max_failed_attempts;
+    ctx->lockout_seconds = lockout_seconds;
+    ctx->clock_trusted = false;
+}
+
 void ac_restore_attempts(ac_ctx_t *ctx, uint8_t failed_attempts, int64_t lockout_until)
 {
     if (ctx == NULL) {
@@ -39,9 +50,6 @@ bool ac_is_locked_out(const ac_ctx_t *ctx, int64_t now)
     return ctx != NULL && ctx->lockout_until > now;
 }
 
-/* Lifts an expired lockout and clears the counter with it. Called from
- * the main loop and from ac_evaluate, so the UI sees the lift without
- * needing a keypress to trigger it. */
 void ac_tick(ac_ctx_t *ctx, int64_t now)
 {
     if (ctx == NULL) {
@@ -51,17 +59,6 @@ void ac_tick(ac_ctx_t *ctx, int64_t now)
         ctx->lockout_until = 0;
         ctx->failed_attempts = 0;
     }
-}
-
-void ac_init(ac_ctx_t *ctx, uint8_t max_failed_attempts, int32_t lockout_seconds)
-{
-    if (ctx == NULL) {
-        return;
-    }
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->max_failed_attempts = max_failed_attempts;
-    ctx->lockout_seconds = lockout_seconds;
-    ctx->clock_trusted = false;
 }
 
 bool ac_format_valid(const char *code)
@@ -75,7 +72,7 @@ bool ac_format_valid(const char *code)
     for (const char *p = code; *p != '\0'; p++) {
         len++;
         if (len > AC_CODE_LEN) {
-            return false;
+            return false; /* bail early rather than walking a long string */
         }
         char c = *p;
         if (c >= '0' && c <= '9') {
@@ -93,8 +90,8 @@ bool ac_format_valid(const char *code)
            letters == AC_REQUIRED_LETTERS && specials == AC_REQUIRED_SPECIALS;
 }
 
-int ac_upsert(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
-              int64_t valid_from, int64_t valid_until)
+static int upsert(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
+                  int64_t valid_from, int64_t valid_until, bool transient)
 {
     if (ctx == NULL || id == NULL || hash == NULL || id[0] == '\0') {
         return -1;
@@ -118,12 +115,45 @@ int ac_upsert(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
 
     ac_slot_t *s = &ctx->slots[idx];
     s->occupied = true;
+    s->transient = transient;
     strncpy(s->id, id, AC_ID_LEN - 1);
     s->id[AC_ID_LEN - 1] = '\0';
     memcpy(s->hash, hash, AC_HASH_LEN);
     s->valid_from = valid_from;
     s->valid_until = valid_until;
     return idx;
+}
+
+int ac_upsert(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
+              int64_t valid_from, int64_t valid_until)
+{
+    return upsert(ctx, id, hash, valid_from, valid_until, false);
+}
+
+int ac_upsert_transient(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HASH_LEN],
+                        int64_t valid_from, int64_t valid_until)
+{
+    /* Clamp rather than reject: the caller asked for a dev code, and a
+     * shorter one is still useful. */
+    if (valid_until > valid_from + AC_TRANSIENT_MAX_S) {
+        valid_until = valid_from + AC_TRANSIENT_MAX_S;
+    }
+    return upsert(ctx, id, hash, valid_from, valid_until, true);
+}
+
+int ac_revoke_transient(ac_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return 0;
+    }
+    int n = 0;
+    for (int i = 0; i < AC_MAX_SLOTS; i++) {
+        if (ctx->slots[i].occupied && ctx->slots[i].transient) {
+            memset(&ctx->slots[i], 0, sizeof(ac_slot_t));
+            n++;
+        }
+    }
+    return n;
 }
 
 bool ac_revoke(ac_ctx_t *ctx, const char *id)
@@ -173,6 +203,9 @@ static void register_failure(ac_ctx_t *ctx, int64_t now)
     if (ctx->failed_attempts < 255) {
         ctx->failed_attempts++;
     }
+    /* The counter is NOT cleared here. It stays at the maximum so the
+     * display can show "5 of 5" while the lockout runs; ac_tick clears
+     * both once the deadline passes (ADR 0004). */
     if (ctx->max_failed_attempts > 0 && ctx->failed_attempts >= ctx->max_failed_attempts) {
         ctx->lockout_until = now + ctx->lockout_seconds;
     }
@@ -215,7 +248,7 @@ ac_result_t ac_evaluate(ac_ctx_t *ctx, const uint8_t hash[AC_HASH_LEN], int64_t 
     const ac_slot_t *s = &ctx->slots[match];
     /* A genuine credential outside its window. The caller already holds
      * a real code, so this leaks nothing and must not consume an
-     * attempt — an early guest would otherwise lock out the gate. */
+     * attempt - an early guest would otherwise lock out the gate. */
     if (now < s->valid_from) {
         return AC_DENIED_NOT_YET;
     }
