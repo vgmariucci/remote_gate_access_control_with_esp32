@@ -139,3 +139,20 @@ int pc_slot_write_half(const uint8_t slot[PC_SLOT_SIZE], uint32_t *next_generati
     }
     return half;
 }
+
+bool pc_apply(ac_ctx_t *ctx, int slot, const pc_code_t *c)
+{
+    if (ctx == NULL || c == NULL || slot < 0 || slot >= AC_MAX_SLOTS || !c->occupied) {
+        return false;
+    }
+    ac_slot_t *s = &ctx->slots[slot];
+    memset(s, 0, sizeof(*s));
+    s->occupied = true;
+    s->transient = false; /* anything on the chip is a stored code */
+    memcpy(s->id, c->id, AC_ID_LEN);
+    s->id[AC_ID_LEN - 1] = '\0';
+    memcpy(s->hash, c->hash, AC_HASH_LEN);
+    s->valid_from = (int64_t)c->valid_from;
+    s->valid_until = (int64_t)c->valid_until;
+    return true;
+}

@@ -220,6 +220,57 @@ TEST_CASE("a revoked code is erased, not just unflagged", "[codes]")
     TEST_ASSERT_FALSE(found);
 }
 
+TEST_CASE("a restored code lands in the slot it came from", "[codes]")
+{
+    fixture();
+    pc_code_t c = a_code("guest003", 33, (uint32_t)(T0 + DAY));
+    TEST_ASSERT_TRUE(pc_apply(&ac, 3, &c));
+    TEST_ASSERT_TRUE(ac.slots[3].occupied);
+    TEST_ASSERT_FALSE(ac.slots[0].occupied);
+    TEST_ASSERT_EQUAL_STRING("guest003", ac.slots[3].id);
+    TEST_ASSERT_EQUAL_MEMORY(c.hash, ac.slots[3].hash, AC_HASH_LEN);
+}
+
+TEST_CASE("a restored code is never transient", "[codes]")
+{
+    fixture();
+    /* Anything on the chip is a stored code, and must not be swept
+     * away by the next `dev off`. */
+    uint8_t h[AC_HASH_LEN];
+    hash_of(h, 1);
+    ac_upsert_transient(&ac, "dev00001", h, T0, T0 + 600);
+
+    pc_code_t c = a_code("guest000", 5, (uint32_t)(T0 + DAY));
+    TEST_ASSERT_TRUE(pc_apply(&ac, 0, &c));
+    TEST_ASSERT_FALSE(ac.slots[0].transient);
+    TEST_ASSERT_EQUAL_INT(0, ac_revoke_transient(&ac));
+    TEST_ASSERT_TRUE(ac.slots[0].occupied);
+}
+
+TEST_CASE("records sharing an id do not collapse into one slot", "[codes]")
+{
+    fixture();
+    /* The console numbered stored codes with a counter that reset at
+     * boot, so two records could carry the same id. Restoring by slot
+     * index keeps both; restoring through ac_upsert lost one. */
+    pc_code_t first = a_code("tst00001", 1, (uint32_t)(T0 + DAY));
+    pc_code_t second = a_code("tst00001", 2, (uint32_t)(T0 + DAY));
+    TEST_ASSERT_TRUE(pc_apply(&ac, 0, &first));
+    TEST_ASSERT_TRUE(pc_apply(&ac, 1, &second));
+    TEST_ASSERT_EQUAL_UINT(2, ac_count(&ac));
+    TEST_ASSERT_EQUAL_MEMORY(first.hash, ac.slots[0].hash, AC_HASH_LEN);
+    TEST_ASSERT_EQUAL_MEMORY(second.hash, ac.slots[1].hash, AC_HASH_LEN);
+}
+
+TEST_CASE("an empty record restores nothing", "[codes]")
+{
+    fixture();
+    pc_code_t empty;
+    memset(&empty, 0, sizeof(empty));
+    TEST_ASSERT_FALSE(pc_apply(&ac, 2, &empty));
+    TEST_ASSERT_FALSE(ac.slots[2].occupied);
+}
+
 TEST_CASE("the code region does not collide with the attempt ring", "[codes]")
 {
     /* The ring owns 0x000-0x7FF; codes must start after it and fit. */

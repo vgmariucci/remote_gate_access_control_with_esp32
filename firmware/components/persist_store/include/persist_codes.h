@@ -65,6 +65,14 @@ bool pc_slot_read(const uint8_t slot[PC_SLOT_SIZE], pc_code_t *c, uint32_t *gene
  * invalid buffer, never the one currently holding the good copy. */
 int pc_slot_write_half(const uint8_t slot[PC_SLOT_SIZE], uint32_t *next_generation);
 
+/* Restores a decoded record into the SAME table slot index it came
+ * from. The inverse of persist_codes_save(ctx, slot), which writes RAM
+ * slot i to EEPROM slot i: restoring through ac_upsert instead lets the
+ * loader pick a different slot, and two records sharing an id then
+ * silently collapse into one. Returns false when the record is not
+ * occupied or the index is out of range. */
+bool pc_apply(ac_ctx_t *ctx, int slot, const pc_code_t *c);
+
 /* Byte offset of a slot's buffer within the EEPROM. */
 static inline uint16_t pc_offset(int slot, int half)
 {

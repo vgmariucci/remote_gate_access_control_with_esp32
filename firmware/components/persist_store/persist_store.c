@@ -136,7 +136,11 @@ int persist_codes_load(ac_ctx_t *ctx)
         if (!pc_slot_read(slot, &c, NULL) || !c.occupied) {
             continue;
         }
-        if (ac_upsert(ctx, c.id, c.hash, (int64_t)c.valid_from, (int64_t)c.valid_until) >= 0) {
+        /* Into the same slot index it came from: persist_codes_save
+         * writes RAM slot i to EEPROM slot i, and this is its inverse.
+         * ac_upsert would pick any free slot, so two records sharing an
+         * id would collapse into one and a code would vanish. */
+        if (pc_apply(ctx, i, &c)) {
             loaded++;
         }
     }
