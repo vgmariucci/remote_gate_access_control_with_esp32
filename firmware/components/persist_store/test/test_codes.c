@@ -220,6 +220,29 @@ TEST_CASE("a revoked code is erased, not just unflagged", "[codes]")
     TEST_ASSERT_FALSE(found);
 }
 
+TEST_CASE("dev ids and backend ids cannot be confused", "[codes]")
+{
+    /* Backend ids are 8 lowercase hex characters. */
+    TEST_ASSERT_FALSE(ac_id_is_dev("a1b2c3d4"));
+    TEST_ASSERT_FALSE(ac_id_is_dev("00000000"));
+    TEST_ASSERT_FALSE(ac_id_is_dev("ffffffff"));
+    TEST_ASSERT_FALSE(ac_id_is_dev("deadbeef"));
+
+    /* Dev ids always contain a non-hex character, so the sets are
+     * disjoint by construction rather than by convention. */
+    TEST_ASSERT_TRUE(ac_id_is_dev("dev00001")); /* 'v' */
+    TEST_ASSERT_TRUE(ac_id_is_dev("tab9ae0b")); /* 't' */
+    TEST_ASSERT_TRUE(ac_id_is_dev("tst00001")); /* 't', 's' */
+
+    /* Anything malformed is treated as dev, never as a guest's: the
+     * safe direction is refusing to erase. */
+    TEST_ASSERT_TRUE(ac_id_is_dev(""));
+    TEST_ASSERT_TRUE(ac_id_is_dev(NULL));
+    TEST_ASSERT_TRUE(ac_id_is_dev("a1b2c3"));    /* too short */
+    TEST_ASSERT_TRUE(ac_id_is_dev("a1b2c3d4e")); /* too long */
+    TEST_ASSERT_TRUE(ac_id_is_dev("A1B2C3D4"));  /* uppercase */
+}
+
 TEST_CASE("a restored code lands in the slot it came from", "[codes]")
 {
     fixture();

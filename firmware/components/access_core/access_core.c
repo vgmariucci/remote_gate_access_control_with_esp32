@@ -156,6 +156,22 @@ int ac_revoke_transient(ac_ctx_t *ctx)
     return n;
 }
 
+bool ac_id_is_dev(const char *id)
+{
+    if (id == NULL || id[0] == '\0') {
+        return true; /* not a backend id, so not a guest's */
+    }
+    size_t n = 0;
+    for (const char *p = id; *p != '\0'; p++, n++) {
+        bool hex = (*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f');
+        if (!hex) {
+            return true;
+        }
+    }
+    /* All hex: a backend id only if it is the right length. */
+    return n != 8;
+}
+
 bool ac_revoke(ac_ctx_t *ctx, const char *id)
 {
     if (ctx == NULL || id == NULL) {

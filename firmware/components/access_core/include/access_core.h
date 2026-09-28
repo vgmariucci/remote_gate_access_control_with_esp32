@@ -124,6 +124,17 @@ int ac_upsert_transient(ac_ctx_t *ctx, const char *id, const uint8_t hash[AC_HAS
  * triggers may fire in any order. */
 int ac_revoke_transient(ac_ctx_t *ctx);
 
+/* True when `id` was created by a dev session rather than delivered by
+ * the backend.
+ *
+ * Backend ids are exactly 8 lowercase hex characters, taken from the
+ * access_code table. Dev sessions use ids that contain at least one
+ * non-hex character ("dev00001", "tab9ae0b" - neither 'v' nor 't' is a
+ * hex digit), so the two sets cannot overlap by construction. That is
+ * what lets a destructive console or portal command refuse to touch a
+ * guest's code without relying on anyone to be careful. */
+bool ac_id_is_dev(const char *id);
+
 /* Removes the slot with this id. Returns true when something was removed. */
 bool ac_revoke(ac_ctx_t *ctx, const char *id);
 
