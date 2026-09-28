@@ -12,8 +12,9 @@
  * USB-Serial/JTAG workflow all depend on it. A fresh sdkconfig can
  * silently pick another chip, so fail loudly instead. */
 #if !CONFIG_IDF_TARGET_ESP32S3
-#error                                                                                        \
-    "Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && idf.py set-target esp32s3"
+#error
+"Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && "
+    "idf.py set-target esp32s3"
 #endif
 
 #include <string.h>
@@ -39,7 +40,7 @@
 #include "ssd1306.h"
 #include "ui.h"
 
-static const char *TAG = "app";
+    static const char *TAG = "app";
 
 #define PIN_I2C_SDA GPIO_NUM_8
 #define PIN_I2C_SCL GPIO_NUM_9
