@@ -1,20 +1,26 @@
 /*
  * dev_console - bench shell over USB-Serial/JTAG.
  *
- * Exists only so the keypad, display and lock can be exercised on the
- * bench before tg_client can deliver real codes. Compiled to nothing
- * unless CONFIG_GATE_DEV_CONSOLE is set.
+ * Exists so the keypad, display, lock and EEPROM can be exercised
+ * before tg_client can deliver real codes. Compiled to nothing unless
+ * CONFIG_GATE_DEV_CONSOLE is set.
  *
- *   gate> time set 1790000000     trust the clock (no NTP yet)
- *   gate> code add 123456AB* 24   valid from now for 24 hours
- *   gate> code clear
+ *   gate> time set 1790000000      trust the clock (no NTP yet)
+ *   gate> code add 123456AB*       dev code: RAM only, 15 min, revoked
+ *                                  when the session ends
+ *   gate> code persist 123456AB* 24  guest-style code: written to the
+ *                                  EEPROM, survives a power cut
+ *   gate> code list                what the table holds
+ *   gate> code del tst00001        revoke and erase from the EEPROM
+ *   gate> code clear               revoke every dev code
+ *   gate> dev off                  same, named for the lifecycle
  *   gate> status
- *   gate> oled border             bring-up check, 5 s
- *   gate> i2c scan                list responding addresses
+ *   gate> oled border              bring-up check, 5 s
+ *   gate> i2c scan                 list responding addresses
  *
- * Note that `code add` puts a plaintext code on the serial line and in
- * the shell history. Acceptable on a bench, and one more reason the
- * console must be off in a deployed unit.
+ * `code add` and `code persist` put a plaintext code on the serial line
+ * and in the shell history. Acceptable on a bench, and one more reason
+ * the console must be off in a deployed unit.
  */
 #include "dev_console.h"
 
@@ -37,6 +43,8 @@ void dev_console_start(void)
 #include "esp_console.h"
 #include "gate_app.h"
 #include "lock_driver.h"
+#include "persist_codes.h"
+#include "persist_store.h"
 #include "rtc_ds3231.h"
 
 static unsigned s_dev_codes;
@@ -46,7 +54,7 @@ static int cmd_time(int argc, char **argv)
     if (argc == 3 && strcmp(argv[1], "set") == 0) {
         long long epoch = strtoll(argv[2], NULL, 10);
         if (rtc_ds3231_set_time((int64_t)epoch) != ESP_OK) {
-            printf("rejected: implausible epoch, or the DS3232 is not answering\n");
+            printf("rejected: implausible epoch, or the DS3231 is not answering\n");
             return 1;
         }
         struct timeval tv = {.tv_sec = (time_t)epoch, .tv_usec = 0};
@@ -65,58 +73,241 @@ static int cmd_time(int argc, char **argv)
     return 0;
 }
 
+/* Shared by `code add` and `code persist`. Returns the slot, or -1. */
+static int add_code(const char *code, int64_t seconds, bool persistent, char out_id[AC_ID_LEN])
+{
+    if (!ac_format_valid(code)) {
+        printf("invalid: need exactly 9 characters - 6 digits, 2 of A-D, 1 of * or #\n");
+        return -1;
+    }
+
+    uint8_t h[AC_HASH_LEN];
+    gate_app_lock();
+    ac_ctx_t *ac = gate_app_access();
+    if (!ac->clock_trusted) {
+        gate_app_unlock();
+        printf("clock not trusted: run `time set <epoch>` first\n");
+        return -1;
+    }
+    gate_app_hash(code, h);
+
+    int64_t now = (int64_t)time(NULL);
+    int slot;
+    if (persistent) {
+        /* Derived from the clock, not from a counter: a static counter
+         * restarts at 1 after every reboot, so two stored codes could
+         * end up sharing an id. */
+        snprintf(out_id, AC_ID_LEN, "t%07llx", (unsigned long long)(now & 0xFFFFFFF));
+        slot = ac_upsert(ac, out_id, h, now - 60, now + seconds);
+    } else {
+        snprintf(out_id, AC_ID_LEN, "dev%05u", ++s_dev_codes);
+        slot = ac_upsert_transient(ac, out_id, h, now - 60, now + seconds);
+    }
+    gate_app_unlock();
+    memset(h, 0, sizeof(h));
+
+    if (slot < 0) {
+        printf("table full (%d slots) - `code list` to see what is in it\n", AC_MAX_SLOTS);
+    }
+    return slot;
+}
+
 static int cmd_code(int argc, char **argv)
 {
+    char id[AC_ID_LEN];
+
     if (argc >= 3 && strcmp(argv[1], "add") == 0) {
-        const char *code = argv[2];
-        if (!ac_format_valid(code)) {
-            printf("invalid: need exactly 9 characters - 6 digits, 2 of A-D, 1 of * or #\n");
-            return 1;
-        }
         long minutes = (argc >= 4) ? strtol(argv[3], NULL, 10) : 15;
         if (minutes <= 0 || minutes > 15) {
             minutes = 15;
         }
+        int slot = add_code(argv[2], (int64_t)minutes * 60, false, id);
+        if (slot < 0) {
+            return 1;
+        }
+        printf("added %s, valid %ld min (dev code: RAM only, cleared when the session ends)\n",
+               id, minutes);
+        return 0;
+    }
 
-        uint8_t h[AC_HASH_LEN];
-        char id[AC_ID_LEN];
+    if (argc >= 3 && strcmp(argv[1], "persist") == 0) {
+        long hours = (argc >= 4) ? strtol(argv[3], NULL, 10) : 24;
+        if (hours <= 0 || hours > 24 * 30) {
+            hours = 24;
+        }
+        int slot = add_code(argv[2], (int64_t)hours * 3600, true, id);
+        if (slot < 0) {
+            return 1;
+        }
+
+        /* This is the path a real guest code will take. Exercising it
+         * here means a power cut proves the EEPROM round trip before
+         * anyone is standing at the gate. */
+        gate_app_lock();
+        esp_err_t err = persist_codes_save(gate_app_access(), slot);
+        gate_app_unlock();
+
+        if (err != ESP_OK) {
+            printf("added %s in RAM, but the EEPROM write FAILED (0x%x): it will not\n"
+                   "survive a reboot. Check `i2c scan` for 0x57.\n",
+                   id, (unsigned)err);
+            return 1;
+        }
+        printf("added %s, valid %ld h, written to EEPROM slot %d\n", id, hours, slot);
+        printf("power-cycle the board: the boot log should say 1 code(s) restored\n");
+        return 0;
+    }
+
+    if (argc == 2 && strcmp(argv[1], "list") == 0) {
+        int64_t now = (int64_t)time(NULL);
         gate_app_lock();
         ac_ctx_t *ac = gate_app_access();
-        if (!ac->clock_trusted) {
-            gate_app_unlock();
-            printf("clock not trusted: run `time set <epoch>` first\n");
-            return 1;
+        printf("slot  id        kind     valid\n");
+        for (int i = 0; i < AC_MAX_SLOTS; i++) {
+            const ac_slot_t *s = &ac->slots[i];
+            if (!s->occupied) {
+                printf("  %d   -\n", i);
+                continue;
+            }
+            long left = (long)(s->valid_until - now);
+            printf("  %d   %-8s  %-7s  ", i, s->id, s->transient ? "dev" : "stored");
+            if (left <= 0) {
+                printf("expired\n");
+            } else if (now < s->valid_from) {
+                printf("not yet\n");
+            } else {
+                printf("%ld min left\n", left / 60);
+            }
         }
-        gate_app_hash(code, h);
-        snprintf(id, sizeof(id), "dev%05u", ++s_dev_codes);
-        int64_t now = (int64_t)time(NULL);
-        int slot = ac_upsert_transient(ac, id, h, now, now + (int64_t)minutes * 60);
         gate_app_unlock();
-        memset(h, 0, sizeof(h));
+        return 0;
+    }
 
+    if (argc == 3 && strcmp(argv[1], "del") == 0) {
+        gate_app_lock();
+        ac_ctx_t *ac = gate_app_access();
+        int slot = -1;
+        for (int i = 0; i < AC_MAX_SLOTS; i++) {
+            if (ac->slots[i].occupied && strncmp(ac->slots[i].id, argv[2], AC_ID_LEN) == 0) {
+                slot = i;
+                break;
+            }
+        }
         if (slot < 0) {
-            printf("table full (%d slots)\n", AC_MAX_SLOTS);
+            gate_app_unlock();
+            printf("no code with id %s - `code list` to see what is in the table\n", argv[2]);
             return 1;
         }
-        printf("added %s, valid for %ld min (dev code: cleared when the session ends)\n", id,
-               minutes);
+        bool was_stored = !ac->slots[slot].transient;
+        ac_revoke(ac, argv[2]);
+        /* Write the now-empty slot through, so the record on the chip
+         * is erased rather than left behind for the next boot. */
+        esp_err_t err = was_stored ? persist_codes_save(ac, slot) : ESP_OK;
+        gate_app_unlock();
+
+        if (err != ESP_OK) {
+            printf("removed %s from RAM, but the EEPROM erase FAILED (0x%x): it will\n"
+                   "come back on the next boot.\n",
+                   argv[2], (unsigned)err);
+            return 1;
+        }
+        printf("removed %s%s\n", argv[2], was_stored ? " (and erased from the EEPROM)" : "");
+        return 0;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "raw") == 0) {
+        int slot = atoi(argv[2]);
+        if (slot < 0 || slot >= AC_MAX_SLOTS) {
+            printf("slot must be 0..%d\n", AC_MAX_SLOTS - 1);
+            return 1;
+        }
+        uint8_t img[PC_SLOT_SIZE];
+        esp_err_t err = persist_raw_read(pc_offset(slot, 0), img, sizeof(img));
+        if (err != ESP_OK) {
+            printf("EEPROM read failed (0x%x)\n", (unsigned)err);
+            return 1;
+        }
+        /* What is actually on the chip, as opposed to what the table
+         * says. The two disagreeing is the whole point of this. */
+        for (int h = 0; h < 2; h++) {
+            const uint8_t *r = &img[h * PC_REC_SIZE];
+            pc_code_t c;
+            uint32_t gen;
+            printf("  half %d @ 0x%03X: ", h, (unsigned)pc_offset(slot, h));
+            if (pc_decode(r, &c, &gen)) {
+                printf("valid, gen %u, %s%s%s\n", (unsigned)gen,
+                       c.occupied ? "occupied, id " : "EMPTY", c.occupied ? c.id : "",
+                       c.occupied ? "" : "");
+            } else {
+                printf("invalid or blank\n");
+            }
+            printf("       ");
+            for (int b = 0; b < 12; b++) {
+                printf("%02X ", r[b]);
+            }
+            printf("\n");
+        }
+        pc_code_t win;
+        uint32_t wgen;
+        if (pc_slot_read(img, &win, &wgen)) {
+            printf("  winner: gen %u, %s\n", (unsigned)wgen,
+                   win.occupied ? win.id : "EMPTY (nothing restores)");
+        } else {
+            printf("  winner: neither half is valid (nothing restores)\n");
+        }
+        return 0;
+    }
+
+    if (argc == 2 && strcmp(argv[1], "erase") == 0) {
+        /* Blunt recovery: write an empty record over every code slot,
+         * both halves, so the chip is definitively clean. */
+        int failed = 0;
+        gate_app_lock();
+        ac_ctx_t *ac = gate_app_access();
+        for (int i = 0; i < AC_MAX_SLOTS; i++) {
+            memset(&ac->slots[i], 0, sizeof(ac_slot_t));
+            if (persist_codes_save(ac, i) != ESP_OK) {
+                failed++;
+            }
+            if (persist_codes_save(ac, i) != ESP_OK) { /* the other half too */
+                failed++;
+            }
+        }
+        gate_app_unlock();
+        printf("code region erased%s\n", failed ? " (with write failures)" : "");
         return 0;
     }
 
     if (argc == 2 && strcmp(argv[1], "clear") == 0) {
-        char id[AC_ID_LEN];
         gate_app_lock();
-        for (unsigned i = 1; i <= s_dev_codes; i++) {
-            snprintf(id, sizeof(id), "dev%05u", i);
-            ac_revoke(gate_app_access(), id);
-        }
+        int n = ac_revoke_transient(gate_app_access());
         gate_app_unlock();
-        printf("removed %u dev code(s)\n", s_dev_codes);
         s_dev_codes = 0;
+        printf("%d dev code(s) revoked (stored codes are untouched)\n", n);
         return 0;
     }
 
-    printf("usage: code add <code> [hours] | code clear\n");
+    printf("usage: code add <code> [minutes]     dev code, RAM only, 15 min max\n"
+           "       code persist <code> [hours]   stored code, written to the EEPROM\n"
+           "       code list\n"
+           "       code del <id>\n"
+           "       code clear                    revoke every dev code\n"
+           "       code raw <slot>               what is actually on the EEPROM\n"
+           "       code erase                    wipe every stored code from the chip\n");
+    return 1;
+}
+
+static int cmd_dev(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "off") == 0) {
+        gate_app_lock();
+        int n = ac_revoke_transient(gate_app_access());
+        gate_app_unlock();
+        s_dev_codes = 0;
+        printf("%d dev code(s) revoked\n", n);
+        return 0;
+    }
+    printf("usage: dev off\n");
     return 1;
 }
 
@@ -131,6 +322,16 @@ static int cmd_status(int argc, char **argv)
     unsigned failed = ac->failed_attempts;
     unsigned maxf = ac->max_failed_attempts;
     int64_t lockout = ac->lockout_until;
+    int stored = 0, transient = 0;
+    for (int i = 0; i < AC_MAX_SLOTS; i++) {
+        if (ac->slots[i].occupied) {
+            if (ac->slots[i].transient) {
+                transient++;
+            } else {
+                stored++;
+            }
+        }
+    }
     gate_app_unlock();
 
     int64_t now = (int64_t)time(NULL);
@@ -138,7 +339,8 @@ static int cmd_status(int argc, char **argv)
 
     printf("clock    : %s\n", trusted ? "trusted" : "UNTRUSTED - every code is refused");
     printf("epoch    : %lld\n", (long long)now);
-    printf("codes    : %u of %d slots\n", (unsigned)slots, AC_MAX_SLOTS);
+    printf("codes    : %u of %d slots (%d stored, %d dev)\n", (unsigned)slots, AC_MAX_SLOTS,
+           stored, transient);
     printf("attempts : %u of %u\n", failed, maxf);
     if (lockout > now) {
         printf("lockout  : %lld s remaining\n", (long long)(lockout - now));
@@ -167,31 +369,21 @@ static int cmd_i2c(int argc, char **argv)
         for (uint16_t a = 0x08; a < 0x78; a++) {
             if (i2c_master_probe(bus, a, 20) == ESP_OK) {
                 const char *what = a == 0x3C   ? "SSD1306 OLED"
-                                   : a == 0x57 ? "AT24C32 EEPROM (attempt counter)"
+                                   : a == 0x57 ? "AT24C32 EEPROM (codes + attempt counter)"
                                    : a == 0x68 ? "DS3231 RTC"
-                                               : "?";
+                                               : "? UNEXPECTED - see the note below";
                 printf("  0x%02X  %s\n", a, what);
                 found++;
             }
         }
         printf("%d device(s)\n", found);
+        if (found != 3) {
+            printf("Expected exactly 3 (0x3C, 0x57, 0x68). Anything else means the bus is\n"
+                   "marginal: fit 4.7k pull-ups from SDA and SCL to 3V3 and scan again.\n");
+        }
         return 0;
     }
     printf("usage: i2c scan\n");
-    return 1;
-}
-
-static int cmd_dev(int argc, char **argv)
-{
-    if (argc == 2 && strcmp(argv[1], "off") == 0) {
-        gate_app_lock();
-        int n = ac_revoke_transient(gate_app_access());
-        gate_app_unlock();
-        s_dev_codes = 0;
-        printf("%d dev code(s) revoked\n", n);
-        return 0;
-    }
-    printf("usage: dev off\n");
     return 1;
 }
 
@@ -210,11 +402,14 @@ void dev_console_start(void)
         {.command = "time",
          .help = "show or set the clock: time set <epoch>",
          .func = cmd_time},
-        {.command = "code", .help = "code add <code> [hours] | code clear", .func = cmd_code},
+        {.command = "code",
+         .help = "code add | persist | list | del | clear | raw | erase",
+         .func = cmd_code},
+        {.command = "dev", .help = "dev off: revoke every dev code", .func = cmd_dev},
         {.command = "status", .help = "clock, codes, attempts, lock", .func = cmd_status},
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
-        {.command = "dev", .help = "dev off: revoke every dev code", .func = cmd_dev},
+
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
