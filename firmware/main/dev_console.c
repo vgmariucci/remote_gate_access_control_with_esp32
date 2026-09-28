@@ -183,7 +183,7 @@ static int cmd_code(int argc, char **argv)
         return 0;
     }
 
-    if (argc == 3 && strcmp(argv[1], "del") == 0) {
+    if (argc >= 3 && strcmp(argv[1], "del") == 0) {
         gate_app_lock();
         ac_ctx_t *ac = gate_app_access();
         int slot = -1;
@@ -199,6 +199,17 @@ static int cmd_code(int argc, char **argv)
             return 1;
         }
         bool was_stored = !ac->slots[slot].transient;
+
+        /* A guest's code is not ours to remove on a whim: deleting one
+         * locks a paying guest out until the backend re-pushes it. */
+        if (!ac_id_is_dev(argv[2]) && !(argc == 4 && strcmp(argv[3], "yes") == 0)) {
+            gate_app_unlock();
+            printf("%s is a GUEST code from the backend, not a dev code.\n"
+                   "Removing it locks that guest out until it is re-pushed.\n"
+                   "If you are sure: code del %s yes\n",
+                   argv[2], argv[2]);
+            return 1;
+        }
         ac_revoke(ac, argv[2]);
         /* Write the now-empty slot through, so the record on the chip
          * is erased rather than left behind for the next boot. */
@@ -258,23 +269,81 @@ static int cmd_code(int argc, char **argv)
         return 0;
     }
 
-    if (argc == 2 && strcmp(argv[1], "erase") == 0) {
-        /* Blunt recovery: write an empty record over every code slot,
-         * both halves, so the chip is definitively clean. */
-        int failed = 0;
+    if (argc >= 2 && strcmp(argv[1], "erase") == 0) {
+        bool confirmed = false;
+        bool force = false;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "yes") == 0) {
+                confirmed = true;
+            } else if (strcmp(argv[i], "all") == 0) {
+                force = true;
+            }
+        }
+
         gate_app_lock();
         ac_ctx_t *ac = gate_app_access();
+        int dev = 0, guest = 0;
         for (int i = 0; i < AC_MAX_SLOTS; i++) {
-            memset(&ac->slots[i], 0, sizeof(ac_slot_t));
-            if (persist_codes_save(ac, i) != ESP_OK) {
-                failed++;
+            const ac_slot_t *sl = &ac->slots[i];
+            if (sl->occupied && !sl->transient) {
+                if (ac_id_is_dev(sl->id)) {
+                    dev++;
+                } else {
+                    guest++;
+                }
             }
-            if (persist_codes_save(ac, i) != ESP_OK) { /* the other half too */
+        }
+
+        /* Always say what is about to be destroyed, by name. */
+        printf("stored codes on the chip:\n");
+        for (int i = 0; i < AC_MAX_SLOTS; i++) {
+            const ac_slot_t *sl = &ac->slots[i];
+            if (sl->occupied && !sl->transient) {
+                printf("  slot %d  %-8s  %s\n", i, sl->id,
+                       ac_id_is_dev(sl->id) ? "dev" : "GUEST (from the backend)");
+            }
+        }
+        if (dev == 0 && guest == 0) {
+            gate_app_unlock();
+            printf("  (none)\n");
+            return 0;
+        }
+
+        if (!confirmed) {
+            gate_app_unlock();
+            printf("nothing erased. To erase the %d dev code(s): code erase yes\n", dev);
+            if (guest > 0) {
+                printf("The %d GUEST code(s) are left alone unless you also say: "
+                       "code erase all yes\n",
+                       guest);
+            }
+            return 0;
+        }
+
+        if (guest > 0 && !force) {
+            printf("erasing dev codes only; %d guest code(s) left in place\n", guest);
+        }
+
+        int cleared = 0, written = 0, failed = 0;
+        for (int i = 0; i < AC_MAX_SLOTS; i++) {
+            ac_slot_t *sl = &ac->slots[i];
+            bool occupied_stored = sl->occupied && !sl->transient;
+            if (occupied_stored && !ac_id_is_dev(sl->id) && !force) {
+                continue;
+            }
+            if (occupied_stored) {
+                cleared++;
+            }
+            memset(sl, 0, sizeof(*sl));
+            if (persist_codes_save(ac, i) != ESP_OK || persist_codes_save(ac, i) != ESP_OK) {
                 failed++;
+            } else {
+                written++;
             }
         }
         gate_app_unlock();
-        printf("code region erased%s\n", failed ? " (with write failures)" : "");
+        printf("%d code(s) erased, %d slot(s) written%s\n", cleared, written,
+               failed ? " (with write failures)" : "");
         return 0;
     }
 
@@ -290,10 +359,11 @@ static int cmd_code(int argc, char **argv)
     printf("usage: code add <code> [minutes]     dev code, RAM only, 15 min max\n"
            "       code persist <code> [hours]   stored code, written to the EEPROM\n"
            "       code list\n"
-           "       code del <id>\n"
+           "       code del <id> [yes]           yes required for a guest code\n"
            "       code clear                    revoke every dev code\n"
            "       code raw <slot>               what is actually on the EEPROM\n"
-           "       code erase                    wipe every stored code from the chip\n");
+           "       code erase [all] [yes]        dry run unless yes; all includes\n"
+           "                                     guest codes\n");
     return 1;
 }
 
@@ -403,13 +473,12 @@ void dev_console_start(void)
          .help = "show or set the clock: time set <epoch>",
          .func = cmd_time},
         {.command = "code",
-         .help = "code add | persist | list | del | clear | raw | erase",
+         .help = "code add | persist | list | del | clear",
          .func = cmd_code},
         {.command = "dev", .help = "dev off: revoke every dev code", .func = cmd_dev},
         {.command = "status", .help = "clock, codes, attempts, lock", .func = cmd_status},
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
-
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
