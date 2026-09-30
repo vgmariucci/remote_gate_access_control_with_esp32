@@ -41,8 +41,8 @@ extern "C" {
 #define PROV_MAX_LOGIN_FAILURES 5
 
 #define PROV_SSID_MAX 32 /* IEEE 802.11 */
-#define PROV_PSK_MIN  8  /* WPA2 */
-#define PROV_PSK_MAX  63 /* 64 means a raw hex PSK */
+#define PROV_PSK_MIN 8   /* WPA2 */
+#define PROV_PSK_MAX 63  /* 64 means a raw hex PSK */
 
 typedef enum {
     PROV_OK = 0,
@@ -102,12 +102,12 @@ typedef enum {
 
 typedef struct {
     prov_state_t state;
-    bool         button_down;
-    bool         button_consumed; /* one session per press */
-    uint32_t     button_down_ms;
-    uint32_t     opened_ms;
-    bool         authenticated;
-    uint8_t      login_failures;
+    bool button_down;
+    bool button_consumed; /* one session per press */
+    uint32_t button_down_ms;
+    uint32_t opened_ms;
+    bool authenticated;
+    uint8_t login_failures;
 } prov_ctx_t;
 
 void prov_init(prov_ctx_t *ctx);
@@ -128,8 +128,8 @@ prov_action_t prov_close(prov_ctx_t *ctx);
  * sees on the next prov_tick. */
 bool prov_login(prov_ctx_t *ctx, bool credentials_ok);
 
-bool     prov_is_open(const prov_ctx_t *ctx);
-bool     prov_is_authenticated(const prov_ctx_t *ctx);
+bool prov_is_open(const prov_ctx_t *ctx);
+bool prov_is_authenticated(const prov_ctx_t *ctx);
 uint32_t prov_seconds_left(const prov_ctx_t *ctx, uint32_t now_ms);
 
 #ifdef __cplusplus
