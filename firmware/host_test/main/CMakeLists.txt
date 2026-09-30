@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS         "host_test_main.c"
     INCLUDE_DIRS "."
-    REQUIRES     unity access_core ui keypad lock_driver display_ssd1306 gate_ctrl persist_store
+    REQUIRES     unity access_core ui keypad lock_driver display_ssd1306 gate_ctrl persist_store wifi_prov
     WHOLE_ARCHIVE
 )
 
@@ -16,4 +16,5 @@ target_sources(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../components/gate_ctrl/test/test_gate_ctrl.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/persist_store/test/test_persist_ring.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/persist_store/test/test_codes.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../../components/wifi_prov/test/test_prov_logic.c"
 )

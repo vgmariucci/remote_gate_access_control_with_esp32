@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Reject a commit that CI's clang-format job would fail.
+set -e
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^firmware/.*\.(c|h)$' || true)
+[ -z "$files" ] && exit 0
+if ! clang-format --dry-run --Werror $files 2>/dev/null; then
+  echo
+  echo "clang-format would change these files. Run:"
+  echo "  clang-format -i $files"
+  exit 1
+fi

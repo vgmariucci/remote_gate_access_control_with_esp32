@@ -5,6 +5,7 @@ firmware/sdkconfig.old
 firmware/host_test/sdkconfig
 firmware/host_test/sdkconfig.old
 firmware/dependencies.lock
+firmware/main/admin_credentials.h
 managed_components/
 
 # clangd index, generated per machine
