@@ -21,6 +21,9 @@
 #include <sys/time.h>
 #include <time.h>
 
+#if !__has_include("admin_credentials.h")
+#error "Copy main/admin_credentials.h.example to main/admin_credentials.h and edit it."
+#endif
 #include "admin_credentials.h"
 #include "dev_console.h"
 #include "driver/i2c_master.h"

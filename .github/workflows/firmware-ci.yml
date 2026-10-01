@@ -67,6 +67,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Provide placeholder credentials
+        run: cp firmware/main/admin_credentials.h.example firmware/main/admin_credentials.h   
       - name: idf.py build
         shell: bash
         run: |
