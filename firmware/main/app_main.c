@@ -21,6 +21,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#if !__has_include("admin_credentials.h")
+#error "Copy main/admin_credentials.h.example to main/admin_credentials.h and edit it."
+#endif
+#include "admin_credentials.h"
 #include "dev_console.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -39,12 +43,15 @@
 #include "rtc_ds3231.h"
 #include "ssd1306.h"
 #include "ui.h"
+#include "wifi_prov.h"
 
     static const char *TAG = "app";
 
 #define PIN_I2C_SDA GPIO_NUM_8
 #define PIN_I2C_SCL GPIO_NUM_9
 #define LOOP_PERIOD_MS 20
+
+#define PIN_PROV_BUTTON GPIO_NUM_21
 
 static ac_ctx_t s_access;
 static ui_ctx_t s_ui;
@@ -250,6 +257,9 @@ void app_main(void)
     QueueHandle_t keys;
     ESP_ERROR_CHECK(keypad_start(&kp_cfg, &keys));
 
+    /* The radio stays off until someone holds the button (ADR 0006). */
+    ESP_ERROR_CHECK(wifi_prov_init(PIN_PROV_BUTTON, PROV_AP_PASSWORD));
+
     dev_console_start();
 
     /* A hung loop must reboot rather than sit with the coil in an
@@ -280,6 +290,23 @@ void app_main(void)
         handle(&t);
 
         lock_driver_tick();
+
+        switch (wifi_prov_tick(now.ms)) {
+        case WIFI_PROV_EVT_CLOSED: {
+            /* Trigger one of three: the session ended, so every code it
+             * created goes with it (ADR 0006). */
+            int n = ac_revoke_transient(&s_access);
+            if (n > 0) {
+                ESP_LOGI(TAG, "portal closed: %d dev code(s) revoked", n);
+            }
+            break;
+        }
+        case WIFI_PROV_EVT_OPENED:
+        case WIFI_PROV_EVT_NONE:
+        default:
+            break;
+        }
+
         ui_render_t r = ui_render(&s_ui, &s_access, now);
         gate_app_unlock();
 
