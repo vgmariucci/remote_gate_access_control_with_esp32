@@ -7,19 +7,24 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 #include "prov_ap.h"
+#include "prov_form.h"
 
 static const char *TAG = "prov";
 
 static prov_ctx_t s_ctx;
 static gpio_num_t s_button = GPIO_NUM_NC;
 static char s_ssid[PROV_AP_SSID_MAX];
-static const char *s_ap_password;
+static wifi_prov_config_t s_cfg;
 
-esp_err_t wifi_prov_init(gpio_num_t button_gpio, const char *ap_password)
+esp_err_t wifi_prov_init(const wifi_prov_config_t *cfg)
 {
+    if (cfg == NULL || cfg->ap_password == NULL || cfg->admin_user == NULL ||
+        cfg->admin_password == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     prov_init(&s_ctx);
-    s_button = button_gpio;
-    s_ap_password = ap_password;
+    s_cfg = *cfg;
+    s_button = cfg->button_gpio;
     s_ssid[0] = '\0';
 
     /* esp_wifi_init needs NVS and the event loop, and they must exist
@@ -41,7 +46,7 @@ esp_err_t wifi_prov_init(gpio_num_t button_gpio, const char *ap_password)
     }
 
     gpio_config_t io = {
-        .pin_bit_mask = (1ULL << button_gpio),
+        .pin_bit_mask = (1ULL << s_button),
         .mode = GPIO_MODE_INPUT,
         /* Active low, so a disconnected wire reads "not pressed" and a
          * shorted one is visible as a session that will not close. */
@@ -54,7 +59,7 @@ esp_err_t wifi_prov_init(gpio_num_t button_gpio, const char *ap_password)
         return err;
     }
     ESP_LOGI(TAG, "provisioning button on GPIO %d, hold %u s to open the portal",
-             (int)button_gpio, (unsigned)(PROV_HOLD_MS / 1000));
+             (int)s_button, (unsigned)(PROV_HOLD_MS / 1000));
     return ESP_OK;
 }
 
@@ -72,7 +77,7 @@ wifi_prov_evt_t wifi_prov_tick(uint32_t now_ms)
 
     switch (a) {
     case PROV_ACTION_OPEN_AP:
-        if (prov_ap_start(s_ap_password, s_ssid, sizeof(s_ssid)) != ESP_OK) {
+        if (prov_ap_start(s_cfg.ap_password, s_ssid, sizeof(s_ssid)) != ESP_OK) {
             /* The radio did not come up. Close the session rather than
              * leaving prov_logic believing a portal is running. */
             prov_close(&s_ctx);
@@ -116,4 +121,46 @@ uint32_t wifi_prov_seconds_left(uint32_t now_ms)
 const char *wifi_prov_ssid(void)
 {
     return s_ssid;
+}
+
+/* ---------------------------------------------------- session bridge
+ *
+ * The HTTP layer calls these rather than touching the prov_logic
+ * context, so the failure counter and the teardown stay in one place.
+ */
+
+bool prov_session_login(const char *user, const char *password)
+{
+    if (user == NULL || password == NULL) {
+        return false;
+    }
+    /* Both comparisons run to completion: a wrong username must not
+     * return faster than a wrong password. */
+    bool user_ok = prov_ct_str_equal(user, s_cfg.admin_user);
+    bool pass_ok = prov_ct_str_equal(password, s_cfg.admin_password);
+    return prov_login(&s_ctx, user_ok && pass_ok);
+}
+
+bool prov_session_is_open(void)
+{
+    return prov_is_open(&s_ctx);
+}
+
+bool prov_session_is_authenticated(void)
+{
+    return prov_is_authenticated(&s_ctx);
+}
+
+void prov_session_logout(void)
+{
+    /* Drops authentication without ending the session: the admin can
+     * log in again until the five minutes run out. */
+    if (prov_is_open(&s_ctx)) {
+        s_ctx.authenticated = false;
+    }
+}
+
+void prov_session_finish(void)
+{
+    wifi_prov_close();
 }

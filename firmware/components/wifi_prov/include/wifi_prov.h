@@ -29,16 +29,21 @@ typedef enum {
     WIFI_PROV_EVT_CLOSED, /* caller revokes dev codes here */
 } wifi_prov_evt_t;
 
+/* Secrets are passed in rather than compiled into this component, so
+ * they stay in main/admin_credentials.h, which is gitignored (ADR
+ * 0006). Every pointer must outlive the component: string literals or
+ * static buffers. */
+typedef struct {
+    gpio_num_t button_gpio;
+    const char *ap_password;    /* WPA2 passphrase for the portal AP, 8-63 */
+    const char *admin_user;     /* portal login */
+    const char *admin_password; /* portal login */
+} wifi_prov_config_t;
+
 /* Configures the button pin and the network stack. Does not touch the
  * radio: an unprovisioned gate that nobody has pressed the button on
- * transmits nothing.
- *
- * `ap_password` is the WPA2 passphrase for the provisioning AP, 8-63
- * characters. It is passed in rather than compiled into this component
- * so the secret stays in main/admin_credentials.h, which is gitignored
- * (ADR 0006). The pointer must outlive the component; a string literal
- * or a static buffer is expected. */
-esp_err_t wifi_prov_init(gpio_num_t button_gpio, const char *ap_password);
+ * transmits nothing. */
+esp_err_t wifi_prov_init(const wifi_prov_config_t *cfg);
 
 /* Poll from the main loop. Reads the button, drives the session clock,
  * and starts or stops the AP when prov_logic says so. */

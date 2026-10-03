@@ -258,7 +258,13 @@ void app_main(void)
     ESP_ERROR_CHECK(keypad_start(&kp_cfg, &keys));
 
     /* The radio stays off until someone holds the button (ADR 0006). */
-    ESP_ERROR_CHECK(wifi_prov_init(PIN_PROV_BUTTON, PROV_AP_PASSWORD));
+    const wifi_prov_config_t prov_cfg = {
+        .button_gpio = PIN_PROV_BUTTON,
+        .ap_password = PROV_AP_PASSWORD,
+        .admin_user = ADMIN_USERNAME,
+        .admin_password = ADMIN_PASSWORD,
+    };
+    ESP_ERROR_CHECK(wifi_prov_init(&prov_cfg));
 
     dev_console_start();
 
