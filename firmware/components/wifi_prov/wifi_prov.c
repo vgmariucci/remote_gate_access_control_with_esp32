@@ -15,6 +15,7 @@ static prov_ctx_t s_ctx;
 static gpio_num_t s_button = GPIO_NUM_NC;
 static char s_ssid[PROV_AP_SSID_MAX];
 static wifi_prov_config_t s_cfg;
+static volatile bool s_finish_requested;
 
 esp_err_t wifi_prov_init(const wifi_prov_config_t *cfg)
 {
@@ -67,6 +68,19 @@ wifi_prov_evt_t wifi_prov_tick(uint32_t now_ms)
 {
     if (s_button == GPIO_NUM_NC) {
         return WIFI_PROV_EVT_NONE;
+    }
+
+    /* An admin who pressed "finish" is served first: the handler only
+     * raised a flag, and this is the task that may safely stop the
+     * server. */
+    if (s_finish_requested) {
+        s_finish_requested = false;
+        if (prov_close(&s_ctx) == PROV_ACTION_CLOSE_AP) {
+            prov_ap_stop();
+            s_ssid[0] = '\0';
+            ESP_LOGI(TAG, "provisioning portal closed by the admin");
+            return WIFI_PROV_EVT_CLOSED;
+        }
     }
 
     bool down = (gpio_get_level(s_button) == 0);
@@ -162,5 +176,10 @@ void prov_session_logout(void)
 
 void prov_session_finish(void)
 {
-    wifi_prov_close();
+    /* Only a request. Tearing the portal down here would call
+     * httpd_stop() from inside an HTTP handler, on the very task
+     * httpd_stop waits for: a self-join that hangs the server and,
+     * when the session later times out, the main loop behind it.
+     * The main loop does the work on its next tick instead. */
+    s_finish_requested = true;
 }

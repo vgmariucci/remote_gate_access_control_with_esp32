@@ -374,6 +374,21 @@ static esp_err_t console_get(httpd_req_t *req)
 /* Anything else, including the connectivity-check URLs phones probe. */
 static esp_err_t catch_all(httpd_req_t *req)
 {
+    /* A POST we do not route still has its body waiting on the socket.
+     * Leaving it there desynchronises the connection: the next request
+     * starts parsing mid-body and fails as a 400. Read it and throw it
+     * away. */
+    char sink[128];
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int want = (remaining < (int)sizeof(sink)) ? remaining : (int)sizeof(sink);
+        int got = httpd_req_recv(req, sink, want);
+        if (got <= 0) {
+            break;
+        }
+        remaining -= got;
+    }
+    memset(sink, 0, sizeof(sink));
     return redirect(req, "http://" PROV_AP_IP "/");
 }
 
@@ -406,10 +421,11 @@ esp_err_t prov_http_start(void)
         {.uri = "/wifi", .method = HTTP_GET, .handler = wifi_get},
         {.uri = "/wifi", .method = HTTP_POST, .handler = wifi_post},
         {.uri = "/console", .method = HTTP_GET, .handler = console_get},
-        /* Last: the wildcard would otherwise swallow the routes above. */
+        /* Last: the wildcard would otherwise swallow the routes above.
+         * POST gets the same treatment, so an unrouted POST is a
+         * redirect rather than a 405 telling a prober which methods
+         * the server knows. */
         {.uri = "/*", .method = HTTP_GET, .handler = catch_all},
-        /* Unknown POSTs get the same redirect, rather than a 405 that
-         * tells a prober which methods the server knows about. */
         {.uri = "/*", .method = HTTP_POST, .handler = catch_all},
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
