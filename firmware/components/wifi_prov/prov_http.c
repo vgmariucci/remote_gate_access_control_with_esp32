@@ -408,6 +408,9 @@ esp_err_t prov_http_start(void)
         {.uri = "/console", .method = HTTP_GET, .handler = console_get},
         /* Last: the wildcard would otherwise swallow the routes above. */
         {.uri = "/*", .method = HTTP_GET, .handler = catch_all},
+        /* Unknown POSTs get the same redirect, rather than a 405 that
+         * tells a prober which methods the server knows about. */
+        {.uri = "/*", .method = HTTP_POST, .handler = catch_all},
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         httpd_register_uri_handler(s_server, &routes[i]);

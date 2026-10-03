@@ -17,4 +17,5 @@ target_sources(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../components/persist_store/test/test_persist_ring.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/persist_store/test/test_codes.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/wifi_prov/test/test_prov_logic.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../../components/wifi_prov/test/test_prov_form.c"
 )
