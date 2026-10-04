@@ -4,7 +4,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
+#include "net_link.h"
 #include "prov_ap.h"
 #include "prov_form.h"
 #include "prov_logic.h"
@@ -16,6 +16,10 @@ static const char *TAG = "prov.http";
 #define SID_HEX_LEN 32 /* 16 random bytes */
 #define BODY_MAX 512
 #define SCAN_MAX 12
+
+/* Long enough for a DHCP round trip on a slow router, short enough
+ * that the admin does not think the page has hung. */
+#define PROV_VERIFY_MS 20000
 
 static httpd_handle_t s_server;
 static char s_sid[SID_HEX_LEN + 1];
@@ -239,18 +243,12 @@ static esp_err_t wifi_page(httpd_req_t *req, const char *message)
         return redirect(req, "/");
     }
 
-    /* Scanning needs a station interface, so the AP briefly runs in
-     * APSTA. Clients see a short stall while the radio hops channels. */
-    esp_wifi_set_mode(WIFI_MODE_APSTA);
-    wifi_scan_config_t scan = {.show_hidden = false};
-    uint16_t found = 0;
+    /* net_link owns the radio and knows what mode the scan needs; the
+     * client sees a short stall while it hops channels. */
     static wifi_ap_record_t records[SCAN_MAX];
-
-    if (esp_wifi_scan_start(&scan, true) == ESP_OK) {
-        found = SCAN_MAX;
-        if (esp_wifi_scan_get_ap_records(&found, records) != ESP_OK) {
-            found = 0;
-        }
+    uint16_t found = SCAN_MAX;
+    if (net_link_scan(records, &found) != ESP_OK) {
+        found = 0;
     }
     ESP_LOGI(TAG, "scan found %u network(s)", (unsigned)found);
 
@@ -287,7 +285,6 @@ static esp_err_t wifi_page(httpd_req_t *req, const char *message)
              "<button type=\"submit\">Salvar</button></form>"
              "<p><a href=\"/\">Voltar</a></p></body></html>");
 
-    esp_wifi_set_mode(WIFI_MODE_AP);
     return send_page(req, body);
 }
 
@@ -304,8 +301,8 @@ static esp_err_t wifi_post(httpd_req_t *req)
 
     char body[BODY_MAX];
     prov_creds_t creds;
-    char chosen[PROV_SSID_MAX + 1] = {0};
-    char manual[PROV_SSID_MAX + 1] = {0};
+    char chosen[PROV_NVS_SSID_MAX + 1] = {0};
+    char manual[PROV_NVS_SSID_MAX + 1] = {0};
     memset(&creds, 0, sizeof(creds));
 
     if (read_body(req, body, sizeof(body)) < 0) {
@@ -338,17 +335,35 @@ static esp_err_t wifi_post(httpd_req_t *req)
         return wifi_page(req, msg);
     }
 
-    esp_err_t err = prov_nvs_save(&creds);
-    char msg[256];
-    if (err == ESP_OK) {
+    /* Verify before save: join the network with these credentials and
+     * wait for an address. A typo written to NVS would survive a
+     * reboot into a network the gate cannot join, and the only way
+     * back would be the button again. */
+    char msg[320];
+    esp_err_t err = net_link_try_credentials(creds.ssid, creds.psk, PROV_VERIFY_MS);
+    if (err != ESP_OK) {
         snprintf(msg, sizeof(msg),
-                 "<p class=\"ok\">Salvo para <b>%s</b>.</p>"
-                 "<p class=\"warn\">Ainda nao testado: a conexao sera verificada "
-                 "no proximo boot.</p>",
+                 "<p class=\"err\">Nao foi possivel conectar em <b>%s</b>. "
+                 "Nada foi salvo: verifique a senha e tente de novo.</p>",
+                 creds.ssid);
+        memset(&creds, 0, sizeof(creds));
+        return wifi_page(req, msg);
+    }
+
+    err = prov_nvs_save(&creds);
+    if (err == ESP_OK) {
+        /* Join for real, now. The verification left the station the
+         * way it found it, which on a gate that had no credentials
+         * means down - and an admin who just configured the network
+         * expects it online, not at the next reboot. */
+        net_link_sta_start();
+        snprintf(msg, sizeof(msg),
+                 "<p class=\"ok\">Conectado e salvo: <b>%s</b>.</p>"
+                 "<p>O portao esta usando esta rede agora.</p>",
                  creds.ssid);
     } else {
-        snprintf(msg, sizeof(msg), "<p class=\"err\">Falha ao gravar (0x%x).</p>",
-                 (unsigned)err);
+        snprintf(msg, sizeof(msg),
+                 "<p class=\"err\">Conectou, mas falhou ao gravar (0x%x).</p>", (unsigned)err);
     }
     /* Never keep the passphrase in RAM past the request. */
     memset(&creds, 0, sizeof(creds));

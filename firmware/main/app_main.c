@@ -38,6 +38,7 @@
 #include "keypad.h"
 #include "lock_driver.h"
 #include "mbedtls/sha256.h"
+#include "net_link.h"
 #include "oled_screens.h"
 #include "persist_store.h"
 #include "rtc_ds3231.h"
@@ -68,6 +69,15 @@ static uint8_t s_salt[32];
 static size_t s_salt_len;
 
 /* ------------------------------------------------------------------ */
+
+/* SNTP reached a time server: the network is only a source, the RTC
+ * stays the authority (ADR 0002). */
+static void on_network_time(int64_t epoch)
+{
+    if (rtc_ds3231_set_time(epoch) == ESP_OK) {
+        ESP_LOGI(TAG, "RTC set from the network");
+    }
+}
 
 static uint32_t now_ms(void)
 {
@@ -265,7 +275,8 @@ void app_main(void)
         .admin_password = ADMIN_PASSWORD,
     };
     ESP_ERROR_CHECK(wifi_prov_init(&prov_cfg));
-
+    ESP_ERROR_CHECK(net_link_init(on_network_time));
+    net_link_sta_start(); /* ESP_ERR_NOT_FOUND is normal: not provisioned yet */
     dev_console_start();
 
     /* A hung loop must reboot rather than sit with the coil in an
@@ -312,6 +323,8 @@ void app_main(void)
         default:
             break;
         }
+
+        net_link_tick(now.ms);
 
         ui_render_t r = ui_render(&s_ui, &s_access, now);
         gate_app_unlock();
