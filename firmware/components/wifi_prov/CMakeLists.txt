@@ -7,11 +7,13 @@ if("${IDF_TARGET}" STREQUAL "linux")
         INCLUDE_DIRS "include"
     )
 else()
+    # The radio belongs to net_link now; what is left here is the
+    # portal: the session, the pages and the captive-portal DNS.
     idf_component_register(
         SRCS "prov_logic.c" "prov_form.c" "wifi_prov.c" "prov_ap.c" "prov_dns.c"
-             "prov_http.c" "prov_nvs.c"
+             "prov_http.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "."
-        REQUIRES driver esp_wifi esp_netif esp_event esp_http_server esp_timer nvs_flash
+        REQUIRES driver esp_http_server esp_timer net_link
     )
 endif()
