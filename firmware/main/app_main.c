@@ -43,6 +43,7 @@
 #include "persist_store.h"
 #include "rtc_ds3231.h"
 #include "ssd1306.h"
+#include "status_led_rgb.h"
 #include "ui.h"
 #include "wifi_prov.h"
 
@@ -51,6 +52,7 @@
 #define PIN_I2C_SDA GPIO_NUM_8
 #define PIN_I2C_SCL GPIO_NUM_9
 #define LOOP_PERIOD_MS 20
+#define PIN_STATUS_LED GPIO_NUM_48
 
 #define PIN_PROV_BUTTON GPIO_NUM_21
 
@@ -279,6 +281,8 @@ void app_main(void)
     net_link_sta_start(); /* ESP_ERR_NOT_FOUND is normal: not provisioned yet */
     dev_console_start();
 
+    status_led_init(PIN_STATUS_LED); /* not fatal if it fails */
+
     /* A hung loop must reboot rather than sit with the coil in an
      * unknown state (ADR 0003). */
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
@@ -292,6 +296,7 @@ void app_main(void)
     }
 
     for (;;) {
+
         esp_task_wdt_reset();
 
         gate_app_lock();
@@ -325,6 +330,14 @@ void app_main(void)
         }
 
         net_link_tick(now.ms);
+
+        const led_inputs_t led = {
+            .online = net_link_sta_connected(),
+            .sync_stale = true, /* until the sync transport lands */
+            .portal_open = wifi_prov_is_open(),
+            .clock_trusted = s_access.clock_trusted,
+        };
+        status_led_tick(&led, now.ms);
 
         ui_render_t r = ui_render(&s_ui, &s_access, now);
         gate_app_unlock();
