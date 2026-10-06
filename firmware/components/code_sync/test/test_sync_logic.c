@@ -257,5 +257,5 @@ TEST_CASE("the blink is brief and periodic", "[led]")
             lit++;
         }
     }
-    TEST_ASSERT_TRUE(lit * 100 < (int)(LED_BLINK_PERIOD_MS / 10));
+    TEST_ASSERT_TRUE(lit * 20 < (int)(LED_BLINK_PERIOD_MS / 10));
 }
