@@ -1,0 +1,7 @@
+dependencies:
+  # Target-only: the host build has no RMT, and led_strip pulls in
+  # esp_driver_spi, which does not exist for the linux target.
+  espressif/led_strip:
+    version: "^2.5.5"
+    rules:
+      - if: "target != linux"

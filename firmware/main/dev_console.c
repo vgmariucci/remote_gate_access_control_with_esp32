@@ -46,6 +46,7 @@ void dev_console_start(void)
 #include "persist_codes.h"
 #include "persist_store.h"
 #include "rtc_ds3231.h"
+#include "status_led_rgb.h"
 
 static unsigned s_dev_codes;
 
@@ -417,6 +418,7 @@ static int cmd_status(int argc, char **argv)
     }
     printf("lock     : %u pulse(s), %u refused\n", (unsigned)lk->pulses_total,
            (unsigned)lk->requests_refused);
+    printf("led      : %s\n", led_colour_name(status_led_current()));
     return 0;
 }
 
@@ -457,6 +459,30 @@ static int cmd_i2c(int argc, char **argv)
     return 1;
 }
 
+static int cmd_led(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("led red|green|blue|amber|magenta\n");
+        return 0;
+    }
+    static const struct {
+        const char *n;
+        led_colour_t c;
+    } map[] = {
+        {"red", LED_RED},     {"green", LED_GREEN},     {"blue", LED_BLUE},
+        {"amber", LED_AMBER}, {"magenta", LED_MAGENTA},
+    };
+    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+        if (strcmp(argv[1], map[i].n) == 0) {
+            status_led_force(map[i].c);
+            printf("%s until the next tick\n", led_colour_name(map[i].c));
+            return 0;
+        }
+    }
+    printf("unknown colour\n");
+    return 1;
+}
+
 void dev_console_start(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -479,6 +505,7 @@ void dev_console_start(void)
         {.command = "status", .help = "clock, codes, attempts, lock", .func = cmd_status},
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
+        {.command = "led", .help = "led red|green|blue|amber|magenta", .func = cmd_led},
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
