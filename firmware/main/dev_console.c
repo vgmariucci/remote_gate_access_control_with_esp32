@@ -41,12 +41,14 @@ void dev_console_start(void)
 #include <time.h>
 
 #include "esp_console.h"
+#include "esp_timer.h"
 #include "gate_app.h"
 #include "lock_driver.h"
 #include "persist_codes.h"
 #include "persist_store.h"
 #include "rtc_ds3231.h"
 #include "status_led_rgb.h"
+#include "sync_client.h"
 
 static unsigned s_dev_codes;
 
@@ -483,6 +485,21 @@ static int cmd_led(int argc, char **argv)
     return 1;
 }
 
+static int cmd_sync(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "now") == 0) {
+        gate_app_lock();
+        esp_err_t err = sync_client_poll_now(gate_app_sync(), gate_app_access(),
+                                             (uint32_t)(esp_timer_get_time() / 1000));
+        gate_app_unlock();
+        printf("%s\n", err == ESP_OK ? "applied" : "nothing applied (see the log)");
+        return 0;
+    }
+    printf("generation held: %llu\n", (unsigned long long)sync_client_generation());
+    printf("usage: sync now\n");
+    return 0;
+}
+
 void dev_console_start(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -506,6 +523,9 @@ void dev_console_start(void)
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
         {.command = "led", .help = "led red|green|blue|amber|magenta", .func = cmd_led},
+        {.command = "sync",
+         .help = "sync now: fetch the code set immediately",
+         .func = cmd_sync},
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
