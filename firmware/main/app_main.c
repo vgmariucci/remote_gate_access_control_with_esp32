@@ -44,6 +44,7 @@
 #include "rtc_ds3231.h"
 #include "ssd1306.h"
 #include "status_led_rgb.h"
+#include "sync_client.h"
 #include "ui.h"
 #include "wifi_prov.h"
 
@@ -63,12 +64,18 @@ static SemaphoreHandle_t s_mutex;
 static uint32_t s_boot_count;
 static volatile uint32_t s_border_until_ms;
 static i2c_master_bus_handle_t s_bus;
+static sync_ctx_t s_sync;
 
 /* Replaced by the provisioned salt from encrypted NVS in the portal
  * step. Until then a dev build uses this public constant, and a
  * non-dev build has no salt, so no code can ever match: fail closed. */
 static uint8_t s_salt[32];
 static size_t s_salt_len;
+
+sync_ctx_t *gate_app_sync(void)
+{
+    return &s_sync;
+}
 
 /* ------------------------------------------------------------------ */
 
@@ -279,6 +286,14 @@ void app_main(void)
     ESP_ERROR_CHECK(wifi_prov_init(&prov_cfg));
     ESP_ERROR_CHECK(net_link_init(on_network_time));
     net_link_sta_start(); /* ESP_ERR_NOT_FOUND is normal: not provisioned yet */
+
+    const sync_client_config_t sync_cfg = {
+        .url = SYNC_URL,
+        .gate_id = SYNC_GATE_ID,
+        .delivery_key = SYNC_DELIVERY_KEY,
+    };
+
+    sync_client_init(&sync_cfg, &s_sync);
     dev_console_start();
 
     status_led_init(PIN_STATUS_LED); /* not fatal if it fails */
@@ -333,11 +348,13 @@ void app_main(void)
 
         const led_inputs_t led = {
             .online = net_link_sta_connected(),
-            .sync_stale = true, /* until the sync transport lands */
+            .sync_stale = sync_is_stale(&s_sync, now.ms),
             .portal_open = wifi_prov_is_open(),
             .clock_trusted = s_access.clock_trusted,
         };
         status_led_tick(&led, now.ms);
+
+        sync_client_tick(&s_sync, &s_access, now.ms, net_link_sta_connected());
 
         ui_render_t r = ui_render(&s_ui, &s_access, now);
         gate_app_unlock();

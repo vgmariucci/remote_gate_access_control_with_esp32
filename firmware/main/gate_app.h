@@ -10,6 +10,7 @@
 
 #include "access_core.h"
 #include "driver/i2c_master.h"
+#include "sync_logic.h"
 
 void gate_app_lock(void);
 void gate_app_unlock(void);
@@ -18,5 +19,7 @@ void gate_app_set_clock_trusted(bool trusted);
 void gate_app_hash(const char *code, uint8_t out[AC_HASH_LEN]);
 void gate_app_show_border(uint32_t duration_ms);
 i2c_master_bus_handle_t gate_app_bus(void);
+/* The sync context, for the console. */
+sync_ctx_t *gate_app_sync(void);
 
 #endif /* GATE_APP_H */
