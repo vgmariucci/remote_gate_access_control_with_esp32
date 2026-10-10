@@ -21,4 +21,5 @@ target_sources(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../components/net_link/test/test_net_retry.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/tg_client/test/test_tg_proto.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/code_sync/test/test_sync_logic.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../../components/code_sync/test/test_sync_parse.c"
 )
