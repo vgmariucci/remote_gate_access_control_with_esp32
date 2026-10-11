@@ -11,7 +11,7 @@ else()
         SRCS "sync_logic.c" "sync_parse.c" "status_led.c" "status_led_rgb.c"
              "sync_client.c"
         INCLUDE_DIRS "include"
-        REQUIRES access_core driver espressif__led_strip esp_http_client
-                 esp-tls mbedtls nvs_flash
+        REQUIRES access_core driver esp_driver_spi espressif__led_strip esp_http_client
+                 esp-tls mbedtls nvs_flash esp_timer
     )
 endif()
