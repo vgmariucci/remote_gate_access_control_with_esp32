@@ -37,7 +37,7 @@
  * silently pick another chip, so fail loudly instead. */
 #if !CONFIG_IDF_TARGET_ESP32S3
 #error                                                                                        \
-    "Wrong target. ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig; idf.py set-target esp32s3"
+    "Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && idf.py set-target esp32s3"
 #endif
 
 #include <string.h>

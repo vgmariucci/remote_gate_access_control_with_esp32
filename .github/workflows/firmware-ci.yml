@@ -76,6 +76,15 @@ jobs:
           cd firmware
           idf.py set-target ${{ matrix.target }}
           idf.py build
+      - name: Build the production image
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd firmware
+          idf.py -B build-prod \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.prod" \
+            -DSDKCONFIG=sdkconfig.prod.generated build
+          ! grep -q "CONFIG_GATE_DEV_CONSOLE=y" sdkconfig.prod.generated
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
@@ -83,4 +92,8 @@ jobs:
           path: |
             firmware/build/*.bin
             firmware/build/*.elf
+<<<<<<< Updated upstream
           retention-days: 14
+=======
+          retention-days: 14
+>>>>>>> Stashed changes

@@ -1,5 +1,8 @@
 # ESP-IDF build output
 build/
+build-*/
+sdkconfig.prod.generated
+sdkconfig.old
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/host_test/sdkconfig
