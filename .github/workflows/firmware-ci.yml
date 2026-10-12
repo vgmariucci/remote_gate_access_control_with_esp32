@@ -92,8 +92,4 @@ jobs:
           path: |
             firmware/build/*.bin
             firmware/build/*.elf
-<<<<<<< Updated upstream
           retention-days: 14
-=======
-          retention-days: 14
->>>>>>> Stashed changes
