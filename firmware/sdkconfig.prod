@@ -1,0 +1,5 @@
+# The image for a door. See README; build with the -B build-prod command.
+#
+# The console can mint codes and prints them in plaintext, and it is
+# also what arms gate_guard's refuse-to-start branch.
+CONFIG_GATE_DEV_CONSOLE=n

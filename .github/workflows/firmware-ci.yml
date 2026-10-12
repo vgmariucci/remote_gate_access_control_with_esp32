@@ -84,3 +84,10 @@ jobs:
             firmware/build/*.bin
             firmware/build/*.elf
           retention-days: 14
+      - name: Build the production image
+        run: |
+          cd firmware
+          idf.py -B build-prod \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.prod" \
+            -DSDKCONFIG=sdkconfig.prod.generated build
+          ! grep -q "CONFIG_GATE_DEV_CONSOLE=y" sdkconfig.prod.generated
