@@ -1,5 +1,8 @@
 # ESP-IDF build output
 build/
+build-*/
+sdkconfig.prod.generated
+sdkconfig.old
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/host_test/sdkconfig
@@ -14,6 +17,7 @@ tools/gate-*.txt
 compile_commands.json
 .cache/
 
+
 # Secrets. Never commit a bot token, an HMAC key or a device salt.
 .env
 .env.*
@@ -26,6 +30,7 @@ secrets/
 .idea/
 *.swp
 .DS_Store
+.vscode/
 
 # Python / web app
 __pycache__/
