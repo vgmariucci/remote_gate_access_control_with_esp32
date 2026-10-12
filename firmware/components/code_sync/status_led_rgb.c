@@ -1,6 +1,7 @@
 #include "status_led_rgb.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_strip.h"
@@ -11,6 +12,20 @@ static led_strip_handle_t s_strip;
 static led_colour_t s_colour = LED_GREEN;
 static bool s_lit;
 static bool s_valid; /* something has been written at least once */
+
+/* A state change is the moment the LED is most worth looking at, so it
+ * flashes at once rather than waiting up to thirty seconds for the
+ * next window. */
+#define CHANGE_FLASH_MS 600u
+static uint32_t s_flash_until_ms;
+static led_colour_t s_reported = LED_GREEN;
+static bool s_reported_valid;
+
+/* `led <colour>` on the console holds the LED long enough to look at.
+ * Without this the next tick reclaims it within milliseconds. */
+#define FORCE_HOLD_MS 4000u
+static uint32_t s_force_until_ms;
+static led_colour_t s_force_colour;
 
 /* Visible from across a yard without lighting the place up at night.
  * Raised from the first attempt, which was dim enough that a 40 ms
@@ -72,17 +87,20 @@ esp_err_t status_led_init(gpio_num_t gpio)
                 .invert_out = false,
             },
     };
-    led_strip_rmt_config_t rmt_cfg = {
-        .clk_src = RMT_CLK_SRC_DEFAULT,
-        .resolution_hz = 20 * 1000 * 1000,
-        .mem_block_symbols = 128,
+    /* SPI rather than RMT: the whole 24-bit frame goes out by DMA, so
+     * a late interrupt cannot stretch a bit. RMT refills its buffer
+     * from an interrupt that Wi-Fi can delay, which showed up as
+     * colours that were right in the log and wrong on the glass. */
+    led_strip_spi_config_t spi_cfg = {
+        .clk_src = SPI_CLK_SRC_DEFAULT,
+        .spi_bus = SPI2_HOST,
         .flags =
             {
-                .with_dma = false,
+                .with_dma = true,
             },
     };
 
-    esp_err_t err = led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &s_strip);
+    esp_err_t err = led_strip_new_spi_device(&strip_cfg, &spi_cfg, &s_strip);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "WS2812 on GPIO %d failed: %s", (int)gpio, esp_err_to_name(err));
         s_strip = NULL;
@@ -121,15 +139,28 @@ void status_led_tick(const led_inputs_t *in, uint32_t now_ms)
         return;
     }
     led_colour_t want = led_colour(in);
-    bool lit = led_is_on(now_ms);
+
+    if (!s_reported_valid || want != s_reported) {
+        ESP_LOGI(TAG, "status: %s", led_colour_name(want));
+        s_flash_until_ms = now_ms + CHANGE_FLASH_MS;
+        s_reported = want;
+        s_reported_valid = true;
+    }
+
+    bool lit;
+    if ((int32_t)(now_ms - s_force_until_ms) < 0) {
+        /* A console request outranks the schedule while it lasts. */
+        want = s_force_colour;
+        lit = true;
+    } else {
+        lit = led_is_on(now_ms) || (int32_t)(now_ms - s_flash_until_ms) < 0;
+    }
 
     /* The main loop runs every few milliseconds; the LED changes twice
-     * a minute. Writing only on a change keeps RMT off the hot path. */
+     * a minute. Writing only on a change keeps the driver off the hot
+     * path. */
     if (s_valid && want == s_colour && lit == s_lit) {
         return;
-    }
-    if (want != s_colour) {
-        ESP_LOGI(TAG, "status: %s", led_colour_name(want));
     }
 
     if (lit) {
@@ -147,10 +178,17 @@ void status_led_tick(const led_inputs_t *in, uint32_t now_ms)
  * wants an answer now rather than in thirty seconds. */
 void status_led_force(led_colour_t c)
 {
-    if (s_strip != NULL) {
-        show(c);
-        s_valid = false; /* let the next tick take it back */
+    if (s_strip == NULL) {
+        return;
     }
+    /* Held for a few seconds so there is something to look at; the
+     * tick takes the LED back when the hold expires. */
+    s_force_colour = c;
+    s_force_until_ms = (uint32_t)(esp_timer_get_time() / 1000) + FORCE_HOLD_MS;
+    show(c);
+    s_colour = c;
+    s_lit = true;
+    s_valid = true;
 }
 
 led_colour_t status_led_current(void)

@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS         "host_test_main.c"
     INCLUDE_DIRS "."
-    REQUIRES     unity access_core ui keypad lock_driver display_ssd1306 gate_ctrl persist_store wifi_prov net_link tg_client code_sync
+    REQUIRES     unity access_core ui keypad lock_driver display_ssd1306 gate_ctrl persist_store wifi_prov net_link tg_client code_sync cred_check
     WHOLE_ARCHIVE
 )
 
@@ -22,4 +22,5 @@ target_sources(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../components/tg_client/test/test_tg_proto.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/code_sync/test/test_sync_logic.c"
     "${CMAKE_CURRENT_LIST_DIR}/../../components/code_sync/test/test_sync_parse.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../../components/cred_check/test/test_cred_check.c"
 )

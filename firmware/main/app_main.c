@@ -6,24 +6,6 @@
  * lock_logic protects the coil, oled_screens draws. This file reads
  * the clocks, moves events between them, and touches the hardware.
  */
-#include "sdkconfig.h"
-
-/* This project is ESP32-S3 only: the dev console, the pin plan and the
- * USB-Serial/JTAG workflow all depend on it. A fresh sdkconfig can
- * silently pick another chip, so fail loudly instead. */
-#if !CONFIG_IDF_TARGET_ESP32S3
-#error
-"Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && "
-    "idf.py set-target esp32s3"
-#endif
-
-#include <string.h>
-#include <sys/time.h>
-#include <time.h>
-
-#if !__has_include("admin_credentials.h")
-#error "Copy main/admin_credentials.h.example to main/admin_credentials.h and edit it."
-#endif
 #include "admin_credentials.h"
 #include "dev_console.h"
 #include "driver/i2c_master.h"
@@ -35,6 +17,7 @@
 #include "freertos/task.h"
 #include "gate_app.h"
 #include "gate_ctrl.h"
+#include "gate_guard.h"
 #include "keypad.h"
 #include "lock_driver.h"
 #include "mbedtls/sha256.h"
@@ -42,21 +25,36 @@
 #include "oled_screens.h"
 #include "persist_store.h"
 #include "rtc_ds3231.h"
+#include "sdkconfig.h"
 #include "ssd1306.h"
 #include "status_led_rgb.h"
 #include "sync_client.h"
 #include "ui.h"
 #include "wifi_prov.h"
 
-    static const char *TAG = "app";
+/* This project is ESP32-S3 only: the dev console, the pin plan and the
+ * USB-Serial/JTAG workflow all depend on it. A fresh sdkconfig can
+ * silently pick another chip, so fail loudly instead. */
+#if !CONFIG_IDF_TARGET_ESP32S3
+#error                                                                                        \
+    "Wrong target. ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig; idf.py set-target esp32s3"
+#endif
+
+#include <string.h>
+#include <sys/time.h>
+#include <time.h>
+
+#if !__has_include("admin_credentials.h")
+#error "Copy main/admin_credentials.h.example to main/admin_credentials.h and edit it."
+#endif
 
 #define PIN_I2C_SDA GPIO_NUM_8
 #define PIN_I2C_SCL GPIO_NUM_9
 #define LOOP_PERIOD_MS 20
 #define PIN_STATUS_LED GPIO_NUM_48
-
 #define PIN_PROV_BUTTON GPIO_NUM_21
 
+static const char *TAG = "app";
 static ac_ctx_t s_access;
 static ui_ctx_t s_ui;
 static gate_ctrl_t s_gate;
@@ -66,9 +64,9 @@ static volatile uint32_t s_border_until_ms;
 static i2c_master_bus_handle_t s_bus;
 static sync_ctx_t s_sync;
 
-/* Replaced by the provisioned salt from encrypted NVS in the portal
- * step. Until then a dev build uses this public constant, and a
- * non-dev build has no salt, so no code can ever match: fail closed. */
+/* The device salt, from admin_credentials.h today and from the
+ * credential dongle later. Every build has it: a production build
+ * that hashed without a salt would accept nothing and look fine. */
 static uint8_t s_salt[32];
 static size_t s_salt_len;
 
@@ -224,16 +222,19 @@ void app_main(void)
 
     s_mutex = xSemaphoreCreateMutex();
 
+    _Static_assert(sizeof(GATE_DEVICE_SALT) - 1 <= sizeof(s_salt),
+                   "GATE_DEVICE_SALT does not fit s_salt");
+    s_salt_len = sizeof(GATE_DEVICE_SALT) - 1;
+    memcpy(s_salt, GATE_DEVICE_SALT, s_salt_len);
+
+    /* Every build: a door with the example password is not a door. */
+    gate_guard_check();
+
 #if CONFIG_GATE_DEV_CONSOLE
-    static const char DEV_SALT[] = "DEV-ONLY-PUBLIC-SALT";
-    s_salt_len = sizeof(DEV_SALT) - 1;
-    memcpy(s_salt, DEV_SALT, s_salt_len);
     ESP_LOGW(TAG, "**************************************************************");
-    ESP_LOGW(TAG, "* DEVELOPMENT BUILD: dev console and a PUBLIC salt are enabled *");
-    ESP_LOGW(TAG, "* Do not install this image on a door.                        *");
+    ESP_LOGW(TAG, "* DEVELOPMENT BUILD: the dev console is enabled, which can   *");
+    ESP_LOGW(TAG, "* mint codes and prints them in plaintext.                   *");
     ESP_LOGW(TAG, "**************************************************************");
-#else
-    s_salt_len = 0;
 #endif
 
     i2c_master_bus_config_t bus_cfg = {
