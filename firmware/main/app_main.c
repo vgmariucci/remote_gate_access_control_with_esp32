@@ -36,7 +36,8 @@
  * USB-Serial/JTAG workflow all depend on it. A fresh sdkconfig can
  * silently pick another chip, so fail loudly instead. */
 #if !CONFIG_IDF_TARGET_ESP32S3
-#error "Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && idf.py set-target esp32s3"
+#error                                                                                        \
+    "Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && idf.py set-target esp32s3"
 #endif
 
 #include <string.h>
@@ -302,9 +303,9 @@ void app_main(void)
     };
 
     sync_client_init(&sync_cfg, &s_sync);
-    
+
     sync_client_start(&s_sync, &s_access);
-    
+
     dev_console_start();
 
     status_led_init(PIN_STATUS_LED); /* not fatal if it fails */
