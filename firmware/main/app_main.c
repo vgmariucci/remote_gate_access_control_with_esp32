@@ -145,6 +145,10 @@ void gate_app_lock(void)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
+static uint32_t app_now_ms(void)
+{
+    return now_pair().ms;
+}
 void gate_app_unlock(void)
 {
     xSemaphoreGive(s_mutex);
@@ -292,9 +296,16 @@ void app_main(void)
         .url = SYNC_URL,
         .gate_id = SYNC_GATE_ID,
         .delivery_key = SYNC_DELIVERY_KEY,
+        .lock = gate_app_lock,
+        .unlock = gate_app_unlock,
+        .online = net_link_sta_connected,
+        .now_ms = app_now_ms,
     };
 
     sync_client_init(&sync_cfg, &s_sync);
+
+    sync_client_start(&s_sync, &s_access);
+
     dev_console_start();
 
     status_led_init(PIN_STATUS_LED); /* not fatal if it fails */
@@ -354,8 +365,6 @@ void app_main(void)
             .clock_trusted = s_access.clock_trusted,
         };
         status_led_tick(&led, now.ms);
-
-        sync_client_tick(&s_sync, &s_access, now.ms, net_link_sta_connected());
 
         ui_render_t r = ui_render(&s_ui, &s_access, now);
         gate_app_unlock();
