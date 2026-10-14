@@ -1,5 +1,9 @@
 # The image for a door. See README; build with the -B build-prod command.
 #
+# Ex.: In firmware directory, type:
+# 
+# idf.py -B build-prod -p /dev/ttyACM0 flash
+# 
 # The console can mint codes and prints them in plaintext, and it is
 # also what arms gate_guard's refuse-to-start branch.
 CONFIG_GATE_DEV_CONSOLE=n
