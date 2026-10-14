@@ -36,8 +36,7 @@
  * USB-Serial/JTAG workflow all depend on it. A fresh sdkconfig can
  * silently pick another chip, so fail loudly instead. */
 #if !CONFIG_IDF_TARGET_ESP32S3
-#error                                                                                        \
-    "Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && idf.py set-target esp32s3"
+#error "Wrong target. This firmware is ESP32-S3 only. Run: unset IDF_TARGET; rm -f sdkconfig && idf.py set-target esp32s3"
 #endif
 
 #include <string.h>
@@ -144,6 +143,10 @@ static void handle(const gate_out_t *o)
 void gate_app_lock(void)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
+}
+static uint32_t app_now_ms(void)
+{
+    return now_pair().ms;
 }
 void gate_app_unlock(void)
 {
@@ -292,9 +295,16 @@ void app_main(void)
         .url = SYNC_URL,
         .gate_id = SYNC_GATE_ID,
         .delivery_key = SYNC_DELIVERY_KEY,
+        .lock = gate_app_lock,
+        .unlock = gate_app_unlock,
+        .online = net_link_sta_connected,
+        .now_ms = app_now_ms,
     };
 
     sync_client_init(&sync_cfg, &s_sync);
+    
+    sync_client_start(&s_sync, &s_access);
+    
     dev_console_start();
 
     status_led_init(PIN_STATUS_LED); /* not fatal if it fails */
@@ -354,8 +364,6 @@ void app_main(void)
             .clock_trusted = s_access.clock_trusted,
         };
         status_led_tick(&led, now.ms);
-
-        sync_client_tick(&s_sync, &s_access, now.ms, net_link_sta_connected());
 
         ui_render_t r = ui_render(&s_ui, &s_access, now);
         gate_app_unlock();

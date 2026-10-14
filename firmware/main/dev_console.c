@@ -488,10 +488,13 @@ static int cmd_led(int argc, char **argv)
 static int cmd_sync(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "now") == 0) {
-        gate_app_lock();
-        esp_err_t err = sync_client_poll_now(gate_app_sync(), gate_app_access(),
-                                             (uint32_t)(esp_timer_get_time() / 1000));
-        gate_app_unlock();
+        /* No lock here. The fetch blocks for as long as the network
+         * takes, and sync_client_poll_now takes the lock itself, only
+         * around the moment it touches the table. Holding it across the
+         * call would deadlock this task on a non-recursive mutex; even
+         * if it did not, holding it across a fetch is the stall this
+         * whole change exists to remove. */
+        esp_err_t err = sync_client_poll_now(gate_app_sync(), gate_app_access());
         printf("%s\n", err == ESP_OK ? "applied" : "nothing applied (see the log)");
         return 0;
     }

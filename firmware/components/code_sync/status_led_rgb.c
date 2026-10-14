@@ -54,13 +54,13 @@ static void rgb_for(led_colour_t c, uint8_t *r, uint8_t *g, uint8_t *b)
     case LED_BLUE:
         *r = 0;
         *g = 0;
-        *b = LVL;
+        *b = DIM;
         break;
     case LED_MAGENTA:
     default:
         *r = DIM;
         *g = 0;
-        *b = LVL;
+        *b = DIM;
         break;
     }
 }
