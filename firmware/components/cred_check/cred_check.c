@@ -15,6 +15,9 @@ static const char *const PLACEHOLDERS[] = {
     "DEV_SALT",
     "dev-salt",
     "https://example.com/gate.txt",
+    /* Deliberately a well-formed token: it passes every structural
+     * rule below, so only being on this list stops it. */
+    "000000000:CHANGE_ME_CHANGE_ME_CHANGE_ME_CHANG",
 };
 
 static const char *const WEAK[] = {
@@ -137,6 +140,56 @@ cred_result_t cred_check_device_salt(const char *salt)
     return CRED_OK;
 }
 
+cred_result_t cred_check_bot_token(const char *token)
+{
+    cred_result_t r = common_checks(token);
+    if (r != CRED_OK) {
+        return r;
+    }
+
+    /* Exactly one colon, with an id before it. A token pasted without
+     * the id half is the usual way this goes wrong: the secret alone
+     * looks plausible and authenticates as nobody. */
+    const char *colon = strchr(token, ':');
+    if (colon == NULL || colon == token || strchr(colon + 1, ':') != NULL) {
+        return CRED_BAD_SHAPE;
+    }
+
+    size_t id_len = (size_t)(colon - token);
+    if (id_len < CRED_TG_ID_MIN_DIGITS || id_len > CRED_TG_ID_MAX_DIGITS) {
+        return CRED_BAD_SHAPE;
+    }
+    for (size_t i = 0; i < id_len; i++) {
+        if (token[i] < '0' || token[i] > '9') {
+            return CRED_BAD_SHAPE;
+        }
+    }
+
+    const char *secret = colon + 1;
+    size_t n = len_of(secret);
+    if (n < CRED_TG_SECRET_MIN_LEN) {
+        return CRED_TOO_SHORT;
+    }
+    if (n > CRED_TG_SECRET_MAX_LEN) {
+        return CRED_TOO_LONG;
+    }
+    for (size_t i = 0; secret[i] != '\0'; i++) {
+        char c = secret[i];
+        bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                  c == '_' || c == '-';
+        if (!ok) {
+            /* Whitespace is the one that bites: a token copied out of a
+             * chat window arrives with a trailing newline, goes into
+             * the URL, and every request comes back 404. */
+            return CRED_BAD_SHAPE;
+        }
+    }
+    if (all_same_char(secret)) {
+        return CRED_NOT_RANDOM;
+    }
+    return CRED_OK;
+}
+
 cred_result_t cred_check_identity(const char *gate_id, const char *url)
 {
     if (len_of(gate_id) == 0 || len_of(url) == 0) {
@@ -174,6 +227,8 @@ const char *cred_result_text(cred_result_t r)
         return "not 64 lowercase hex characters";
     case CRED_NOT_RANDOM:
         return "all one character";
+    case CRED_BAD_SHAPE:
+        return "not the shape this credential has to be";
     default:
         return "?";
     }
