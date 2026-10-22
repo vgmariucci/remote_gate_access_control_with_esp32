@@ -24,6 +24,7 @@ jobs:
   clang-format:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.4.4
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Check formatting
@@ -34,7 +35,7 @@ jobs:
           . $IDF_PATH/export.sh
           clang-format --version
           find firmware -name '*.c' -o -name '*.h' \
-            | xargs clang-format --dry-run --Werror
+            | xargs -r clang-format --dry-run --Werror
 
   host-tests:
     name: unit tests (linux target)
