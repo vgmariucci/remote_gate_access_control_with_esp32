@@ -49,6 +49,7 @@ void dev_console_start(void)
 #include "rtc_ds3231.h"
 #include "status_led_rgb.h"
 #include "sync_client.h"
+#include "tg_client.h"
 
 static unsigned s_dev_codes;
 
@@ -503,6 +504,17 @@ static int cmd_sync(int argc, char **argv)
     return 0;
 }
 
+static int cmd_tg(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    printf("courier: %s\n", tg_client_state_text());
+    printf("counter held: %llu\n", (unsigned long long)tg_client_counter());
+    printf("update offset: %llu\n", (unsigned long long)tg_client_offset());
+    return 0;
+}
+
+
 void dev_console_start(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -526,9 +538,8 @@ void dev_console_start(void)
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
         {.command = "led", .help = "led red|green|blue|amber|magenta", .func = cmd_led},
-        {.command = "sync",
-         .help = "sync now: fetch the code set immediately",
-         .func = cmd_sync},
+        {.command = "sync", .help = "sync now: fetch the code set immediately", .func = cmd_sync},
+        {.command = "tg", .help = "calls telegram code sync", .func = cmd_tg},
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
