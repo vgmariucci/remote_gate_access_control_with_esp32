@@ -29,6 +29,7 @@
 #include "ssd1306.h"
 #include "status_led_rgb.h"
 #include "sync_client.h"
+#include "tg_client.h"
 #include "ui.h"
 #include "wifi_prov.h"
 
@@ -305,6 +306,18 @@ void app_main(void)
     sync_client_init(&sync_cfg, &s_sync);
 
     sync_client_start(&s_sync, &s_access);
+
+    const tg_client_config_t tg_cfg = {
+        .bot_token = TG_BOT_TOKEN,
+        .delivery_key = SYNC_DELIVERY_KEY, /* one key, two transports */
+        .lock = gate_app_lock,
+        .unlock = gate_app_unlock,
+        .online = net_link_sta_connected,
+        .now_ms = now_ms,
+    };
+    if (tg_client_init(&tg_cfg) == ESP_OK) {
+        tg_client_start(&s_access);
+    }
 
     dev_console_start();
 
