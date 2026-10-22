@@ -514,7 +514,6 @@ static int cmd_tg(int argc, char **argv)
     return 0;
 }
 
-
 void dev_console_start(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -538,7 +537,9 @@ void dev_console_start(void)
         {.command = "oled", .help = "oled border: bring-up check", .func = cmd_oled},
         {.command = "i2c", .help = "i2c scan: list responding addresses", .func = cmd_i2c},
         {.command = "led", .help = "led red|green|blue|amber|magenta", .func = cmd_led},
-        {.command = "sync", .help = "sync now: fetch the code set immediately", .func = cmd_sync},
+        {.command = "sync",
+         .help = "sync now: fetch the code set immediately",
+         .func = cmd_sync},
         {.command = "tg", .help = "calls telegram code sync", .func = cmd_tg},
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {

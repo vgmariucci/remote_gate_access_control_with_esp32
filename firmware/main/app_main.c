@@ -306,7 +306,7 @@ void app_main(void)
     sync_client_init(&sync_cfg, &s_sync);
 
     sync_client_start(&s_sync, &s_access);
-    
+
     const tg_client_config_t tg_cfg = {
         .bot_token = TG_BOT_TOKEN,
         .delivery_key = SYNC_DELIVERY_KEY, /* one key, two transports */
