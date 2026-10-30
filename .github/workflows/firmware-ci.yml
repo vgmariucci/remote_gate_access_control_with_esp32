@@ -92,4 +92,8 @@ jobs:
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
+          name: portao-firmware-${{ matrix.target }}
           path: |
+            firmware/build/*.bin
+            firmware/build/*.elf
+          retention-days: 14
