@@ -1,9 +1,22 @@
 # The image for a door. See README; build with the -B build-prod command.
 #
 # Ex.: In firmware directory, type:
-# 
+#
 # idf.py -B build-prod -p /dev/ttyACM0 flash
-# 
+#
 # The console can mint codes and prints them in plaintext, and it is
 # also what arms gate_guard's refuse-to-start branch.
 CONFIG_GATE_DEV_CONSOLE=n
+
+# Every tag starts silent. app_main raises the project's own tags back
+# to INFO, so the attempt trail, the lock, the sync generation and the
+# network transitions still reach a serial console - and the radio's
+# running commentary, the TLS layer and anything added later do not.
+#
+# The compile-time ceiling stays at INFO (sdkconfig.defaults), so this
+# is a runtime decision rather than code that was never built.
+#
+# Note the build prints "Choice LOG_DEFAULT_LEVEL has multiple active
+# selections": that is this line overriding the INFO in
+# sdkconfig.defaults, which is how the layering is meant to work.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y

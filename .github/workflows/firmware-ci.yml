@@ -36,6 +36,10 @@ jobs:
           clang-format --version
           find firmware -name '*.c' -o -name '*.h' \
             | xargs -r clang-format --dry-run --Werror
+      - name: Check the log allow-list
+        shell: bash
+        run: ./tools/check_log_tags.sh
+
 
   host-tests:
     name: unit tests (linux target)

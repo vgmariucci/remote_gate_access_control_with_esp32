@@ -10,8 +10,18 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_ESP_TASK_WDT_PANIC=y
 CONFIG_ESP_INT_WDT=y
 
-# Logging. Drop to WARN for release builds so that codes and ids cannot
-# leak through a serial console someone left attached.
+# Logging, in two parts.
+#
+# MAXIMUM is the compile-time ceiling: an ESP_LOGI above it is not in
+# the binary at all and no runtime call can bring it back. It stays at
+# INFO in every build so that a door can still be told to talk.
+#
+# DEFAULT is where every tag starts at boot. INFO here; sdkconfig.prod
+# drops it to WARN, which makes a production image silent by default and
+# leaves app_main's allow-list to name what is worth hearing. A chatty
+# component added next year is then quiet until somebody decides it
+# should not be.
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # Partition layout with two OTA slots plus an encrypted NVS partition.
@@ -23,12 +33,12 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
 # Enable these only once the board is final: flash encryption is a
-# one-way door on a production device.
+# one-way door on a production device. Uncomment, then `rm sdkconfig`
+# and rebuild.
 # CONFIG_SECURE_FLASH_ENC_ENABLED=y
 # CONFIG_SECURE_BOOT=y
 # CONFIG_NVS_ENCRYPTION=y
-# Append to firmware/sdkconfig.defaults, then `rm sdkconfig` and rebuild.
-#
+
 # The dev console reads from USB-Serial/JTAG, which is the port you
 # flash and monitor through. Making it the primary console routes the
 # REPL and the logs over that one cable.
@@ -41,8 +51,4 @@ CONFIG_FREERTOS_HZ=1000
 # The main task runs the whole loop, including SHA-256.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
-# The dev console reads from USB-Serial/JTAG.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
-CONFIG_HTTPD_MAX_URI_LEN=256
