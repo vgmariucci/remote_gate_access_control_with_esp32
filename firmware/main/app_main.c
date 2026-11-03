@@ -9,7 +9,9 @@
 #include "admin_credentials.h"
 #include "dev_console.h"
 #include "driver/i2c_master.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -32,9 +34,6 @@
 #include "tg_client.h"
 #include "ui.h"
 #include "wifi_prov.h"
-#include "esp_app_desc.h"
-#include "esp_system.h"
-
 
 /* This project is ESP32-S3 only: the dev console, the pin plan and the
  * USB-Serial/JTAG workflow all depend on it. A fresh sdkconfig can
@@ -226,16 +225,26 @@ static void boot_persist(i2c_master_bus_handle_t bus)
 static const char *reset_reason_text(void)
 {
     switch (esp_reset_reason()) {
-    case ESP_RST_POWERON:  return "power-on";
-    case ESP_RST_SW:       return "software restart";
-    case ESP_RST_PANIC:    return "panic";
-    case ESP_RST_INT_WDT:  return "interrupt watchdog";
-    case ESP_RST_TASK_WDT: return "task watchdog";
-    case ESP_RST_WDT:      return "another watchdog";
-    case ESP_RST_BROWNOUT: return "brownout";
-    case ESP_RST_DEEPSLEEP:return "deep sleep";
-    case ESP_RST_EXT:      return "external reset";
-    default:               return "unknown";
+    case ESP_RST_POWERON:
+        return "power-on";
+    case ESP_RST_SW:
+        return "software restart";
+    case ESP_RST_PANIC:
+        return "panic";
+    case ESP_RST_INT_WDT:
+        return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:
+        return "task watchdog";
+    case ESP_RST_WDT:
+        return "another watchdog";
+    case ESP_RST_BROWNOUT:
+        return "brownout";
+    case ESP_RST_DEEPSLEEP:
+        return "deep sleep";
+    case ESP_RST_EXT:
+        return "external reset";
+    default:
+        return "unknown";
     }
 }
 
@@ -247,10 +256,8 @@ static void apply_log_policy(void)
 {
     static const char *const OURS[] = {
         /* log-allowlist:begin */
-        "app",      "guard",    "lock",      "keypad", "rtc",
-        "persist",  "oled",     "led",       "net",    "sync",
-        "tg",       "prov",     "prov.ap",   "prov.dns",
-        "prov.http","prov.nvs",
+        "app", "guard", "lock", "keypad", "rtc",     "persist",  "oled",      "led",
+        "net", "sync",  "tg",   "prov",   "prov.ap", "prov.dns", "prov.http", "prov.nvs",
         /* log-allowlist:end */
     };
     for (size_t i = 0; i < sizeof(OURS) / sizeof(OURS[0]); i++) {
@@ -276,7 +283,7 @@ void app_main(void)
     const esp_app_desc_t *desc = esp_app_get_description();
     ESP_LOGI(TAG, "portao-firmware %s, reset: %s, heap=%lu", desc->version,
              reset_reason_text(), (unsigned long)esp_get_free_heap_size());
-             
+
     s_mutex = xSemaphoreCreateMutex();
 
     _Static_assert(sizeof(GATE_DEVICE_SALT) - 1 <= sizeof(s_salt),
