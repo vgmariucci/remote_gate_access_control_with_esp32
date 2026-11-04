@@ -3,4 +3,5 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES access_core ui gate_ctrl keypad lock_driver display_ssd1306
              rtc_ds3231 persist_store console mbedtls esp_timer driver wifi_prov net_link code_sync cred_check tg_client
+    PRIV_REQUIRES esp_app_format
 )

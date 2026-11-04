@@ -9,7 +9,9 @@
 #include "admin_credentials.h"
 #include "dev_console.h"
 #include "driver/i2c_master.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -220,10 +222,67 @@ static void boot_persist(i2c_master_bus_handle_t bus)
     persist_attempts(); /* records the boot count */
 }
 
+static const char *reset_reason_text(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:
+        return "power-on";
+    case ESP_RST_SW:
+        return "software restart";
+    case ESP_RST_PANIC:
+        return "panic";
+    case ESP_RST_INT_WDT:
+        return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:
+        return "task watchdog";
+    case ESP_RST_WDT:
+        return "another watchdog";
+    case ESP_RST_BROWNOUT:
+        return "brownout";
+    case ESP_RST_DEEPSLEEP:
+        return "deep sleep";
+    case ESP_RST_EXT:
+        return "external reset";
+    default:
+        return "unknown";
+    }
+}
+
+/* A production image starts with every tag at WARN, so this list is the
+ * whole of what a door will say. tools/check_log_tags.sh fails CI if a
+ * component's tag is missing from it, because a subsystem that goes
+ * quiet on a door goes quiet in a way nobody notices. */
+static void apply_log_policy(void)
+{
+    static const char *const OURS[] = {
+        /* log-allowlist:begin */
+        "app", "guard", "lock", "keypad", "rtc",     "persist",  "oled",      "led",
+        "net", "sync",  "tg",   "prov",   "prov.ap", "prov.dns", "prov.http", "prov.nvs",
+        /* log-allowlist:end */
+    };
+    for (size_t i = 0; i < sizeof(OURS) / sizeof(OURS[0]); i++) {
+        esp_log_level_set(OURS[i], ESP_LOG_INFO);
+    }
+
+    /* Both builds, and this one is not about noise. The bot token is
+     * inside the request URL - api.telegram.org/bot<TOKEN>/getUpdates -
+     * and an HTTP client turned up to DEBUG prints the URL it is
+     * fetching. tg_client never logs it; the layer underneath would. */
+    esp_log_level_set("esp_http_client", ESP_LOG_WARN);
+
+    /* Both builds. One line per long poll, every 53 seconds, forever:
+     * about 1,600 a day saying a certificate chain verified exactly as
+     * it did the time before. It would bury whatever went wrong. */
+    esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
+}
+
 void app_main(void)
 {
-    ESP_LOGI(TAG, "portao-firmware starting, heap=%lu",
-             (unsigned long)esp_get_free_heap_size());
+    apply_log_policy();
+
+    const esp_app_desc_t *desc = esp_app_get_description();
+    ESP_LOGI(TAG, "portao-firmware %s, reset: %s, heap=%lu", desc->version,
+             reset_reason_text(), (unsigned long)esp_get_free_heap_size());
 
     s_mutex = xSemaphoreCreateMutex();
 
