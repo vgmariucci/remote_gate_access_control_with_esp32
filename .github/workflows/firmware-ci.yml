@@ -1,11 +1,15 @@
 name: firmware-ci
 
+# No `paths:` filter, deliberately. These three jobs are required
+# checks in branch protection, and a run that is filtered out never
+# reports a status - so a docs-only pull request waits forever on
+# checks that will never start. A few minutes of runner time is
+# cheaper than a wedged PR, and the filter had already missed
+# tools/, which the clang-format job runs.
 on:
   push:
     branches: [main]
-    paths: ['firmware/**', '.github/workflows/firmware-ci.yml']
   pull_request:
-    paths: ['firmware/**', '.github/workflows/firmware-ci.yml']
 
 # A new push to the same branch cancels the run still in flight. Without
 # this, three pushes in five minutes means three full matrices billing
