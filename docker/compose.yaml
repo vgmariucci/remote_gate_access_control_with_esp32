@@ -1,0 +1,62 @@
+# Development stack. One `docker compose up -d db` and you have the
+# database the schema was written against.
+#
+#   docker compose up -d db          # just Postgres
+#   docker compose exec db psql -U gate gate
+#   docker compose down              # stop, keep the data
+#   docker compose down -v           # stop, and throw the data away
+#
+# The repo must live inside the WSL2 filesystem (~/wsl_projects/... is
+# right) and not under /mnt/c. A bind mount across the Windows boundary
+# is slow enough to be noticeable on every file the container reads.
+
+name: portao
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gate
+      POSTGRES_USER: gate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env}
+      # Deterministic collation, so an ORDER BY here matches an ORDER
+      # BY in whatever you deploy to.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      # 127.0.0.1 on purpose. Without the prefix, Docker publishes on
+      # every interface and your database is reachable from the LAN,
+      # which on this project means the delivery keys are too.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Anything in here runs ONCE, when the data directory is first
+      # created. Editing schema.sql and restarting does nothing: you
+      # need `docker compose down -v` to see the change. This is the
+      # single most common way to lose an hour with this image.
+      - ../backend/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gate -d gate"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Not written yet. Left here so the shape is visible, and because
+  # `depends_on: service_healthy` is the bit people leave out and then
+  # spend a morning on: without it the API starts while Postgres is
+  # still running its init scripts and fails its first connection.
+  #
+  # api:
+  #   build: ../backend
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_URL: postgresql://gate:${POSTGRES_PASSWORD}@db:5432/gate
+  #   ports:
+  #     - "127.0.0.1:8000:8000"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+
+volumes:
+  pgdata:
