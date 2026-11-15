@@ -34,7 +34,8 @@ services:
       # created. Editing schema.sql and restarting does nothing: you
       # need `docker compose down -v` to see the change. This is the
       # single most common way to lose an hour with this image.
-      - ../backend/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      # The whole directory, run in filename order: 0001, then 0002.
+      - ../backend/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gate -d gate"]
       interval: 5s
