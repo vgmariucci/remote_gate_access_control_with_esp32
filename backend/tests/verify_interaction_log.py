@@ -12,11 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from pg import banner, check, q, q_fails, summary  # noqa: E402
+from pg import GATE, OTHER_GATE, banner, check, q, q_fails, summary  # noqa: E402
 
 banner()
 
-GATE = "portao-01"
 
 
 def events(*rows) -> str:
@@ -33,9 +32,6 @@ def ingest(batch: str, dropped: int = 0) -> int:
 
 
 # ---------------------------------------------------------------- setup
-q("delete from interaction_upload;")
-q("set session gate.retention = 'on'; delete from interaction_log;")
-q("delete from gate;")
 q(f"insert into gate (gate_id, label) values ('{GATE}', 'bench');")
 q(f"""insert into gate_secret (gate_id, device_salt, delivery_key)
       values ('{GATE}', 'bench-salt-not-a-real-one', decode(repeat('9f',32), 'hex'));""")
@@ -132,15 +128,15 @@ err = q_fails(f"""select ingest_log_batch('{GATE}',
 check("an unknown event type is refused",
       "interaction_log_event_check" in err, err)
 
-err = q_fails("""select ingest_log_batch('portao-99',
+err = q_fails("""select ingest_log_batch('{OTHER_GATE}',
     '[{"seq":1,"ts":1,"event":"boot","clock_trusted":false}]'::jsonb);""")
 check("a batch for an unknown gate is refused", "no such gate" in err, err)
 
 # ------------------------------------------- the log outlives what it describes
 # An audit record has to survive the deletion of the code it names.
-q("""insert into access_code (code_id, gate_id, code_hash, valid_from,
+q(f"""insert into access_code (code_id, gate_id, code_hash, valid_from,
        valid_until, slot)
-     values ('a1b2c3d4', 'portao-01', decode(repeat('aa',32),'hex'),
+     values ('a1b2c3d4', '{GATE}', decode(repeat('aa',32),'hex'),
              to_timestamp(1800000000), to_timestamp(1900000000), 0)
      on conflict do nothing;""")
 q("set session gate.retention = 'off';")
