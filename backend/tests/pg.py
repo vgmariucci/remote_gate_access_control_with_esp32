@@ -61,6 +61,14 @@ PSQL, TRANSPORT = psql_argv()
 
 FAILURES: list[str] = []
 
+# Every fixture these suites create lives under this prefix, and every
+# row they delete is scoped to it. A real gate in the same database is
+# never touched - which is not a thing to take on trust, so
+# verify_schema.py plants a sentinel and checks it survives.
+TEST_PREFIX = "test-gate-"
+GATE = f"{TEST_PREFIX}01"
+OTHER_GATE = f"{TEST_PREFIX}02"
+
 
 def _run(sql: str) -> subprocess.CompletedProcess:
     # -X so a developer's ~/.psqlrc cannot change the output format out
@@ -91,11 +99,60 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         FAILURES.append(name)
 
 
+def require_disposable() -> None:
+    """Refuse to run against a database nobody has said is throwaway.
+
+    These suites write and delete. Scoping every statement to
+    TEST_PREFIX means a real gate survives even so, but "survives a
+    destructive test run" is a weaker promise than "the destructive
+    test run does not start".
+
+    The marker is a database-level setting rather than an environment
+    variable, because it travels with the database instead of with
+    whoever's shell happens to be open:
+
+        alter database gate set gate.disposable = 'on';
+
+    backend/dev_setup.sh does that for the development container. A
+    production database simply never has it, so pointing DATABASE_URL
+    at one and running these by mistake stops here.
+    """
+    marker = q("select coalesce(current_setting('gate.disposable', true), '');")
+    if marker != "on":
+        raise SystemExit(
+            "refusing to run: this database is not marked disposable.\n"
+            "  These suites create and delete rows. To mark a development\n"
+            "  database:\n"
+            "      alter database <db> set gate.disposable = 'on';\n"
+            "  or run backend/dev_setup.sh, which does it along with the\n"
+            "  api_user role."
+        )
+
+
+def cleanup() -> None:
+    """Remove this suite's fixtures, and only this suite's.
+
+    interaction_log and interaction_upload reference gate without a
+    cascade - deliberately, so that removing a gate cannot quietly take
+    its history - so they go first.
+    """
+    q(f"""set session gate.retention = 'on';
+          delete from interaction_log    where gate_id like '{TEST_PREFIX}%';
+          delete from interaction_upload where gate_id like '{TEST_PREFIX}%';
+          delete from tg_delivery        where gate_id like '{TEST_PREFIX}%';
+          delete from gate               where gate_id like '{TEST_PREFIX}%';""")
+
+
 def banner() -> None:
     print(f"via {TRANSPORT}\n")
+    require_disposable()
+    cleanup()
 
 
 def summary() -> int:
+    # Leave nothing behind. A fixture that outlives its run is how a
+    # bench salt ends up signing a real gate's code set.
+    cleanup()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s): {', '.join(FAILURES)}")

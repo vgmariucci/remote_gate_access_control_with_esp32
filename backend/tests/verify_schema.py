@@ -15,7 +15,7 @@ from pathlib import Path
 # import path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from pg import ENV, banner, check, q, q_fails, summary  # noqa: E402
+from pg import ENV, banner, check, cleanup, q, q_fails, summary  # noqa: E402
 
 banner()
 
@@ -23,10 +23,9 @@ SALT = "dev-salt-for-the-bench-only"
 KEY = "9f" * 32
 
 # ---------------------------------------------------------------- setup
-q("delete from gate;")
-q(f"insert into gate (gate_id, label) values ('portao-01', 'bench');")
+q(f"insert into gate (gate_id, label) values ('test-gate-01', 'bench');")
 q(f"""insert into gate_secret (gate_id, device_salt, delivery_key)
-      values ('portao-01', '{SALT}', decode('{KEY}', 'hex'));""")
+      values ('test-gate-01', '{SALT}', decode('{KEY}', 'hex'));""")
 
 # ---------------------------------------------------- format_version 1
 # Exactly 9 chars: 6 digits, 2 of A-D, 1 of * #. ac_format_valid().
@@ -46,31 +45,31 @@ check("the special lands in every position, so the shuffle runs",
       len(seen_special_pos) == 9, f"positions seen: {sorted(seen_special_pos)}")
 
 # ------------------------------------------------------- generation
-gen0 = int(q("select generation from gate where gate_id='portao-01';"))
+gen0 = int(q("select generation from gate where gate_id='test-gate-01';"))
 check("a fresh gate starts at generation 0", gen0 == 0, f"got {gen0}")
 
 issued = []
 for i in range(3):
     row = q(f"""select code_id, plaintext from issue_code(
-                 'portao-01',
+                 'test-gate-01',
                  to_timestamp({1800000000 + i}),
                  to_timestamp({1900000000 + i}),
                  'guest {i}');""")
     code_id, plain = row.split("|")
     issued.append((code_id, plain, 1800000000 + i, 1900000000 + i))
 
-gen3 = int(q("select generation from gate where gate_id='portao-01';"))
+gen3 = int(q("select generation from gate where gate_id='test-gate-01';"))
 check("three inserts move the generation three times", gen3 == 3, f"got {gen3}")
 
 # -------------------------------------------- the body, byte for byte
-body = q("select gate_sync_body('portao-01');")
+body = q("select gate_sync_body('test-gate-01');")
 
 rows = q("""select code_id, encode(code_hash,'hex'),
                    floor(extract(epoch from valid_from))::bigint,
                    floor(extract(epoch from valid_until))::bigint
-              from gate_live_code where gate_id='portao-01' order by slot;""")
+              from gate_live_code where gate_id='test-gate-01' order by slot;""")
 
-lines = ["portao-sync v1", "gate portao-01", f"gen {gen3}"]
+lines = ["portao-sync v1", "gate test-gate-01", f"gen {gen3}"]
 for r in rows.split("\n"):
     cid, h, f, u = r.split("|")
     lines.append(f"code {cid} {h} {f} {u}")
@@ -92,7 +91,7 @@ check("code_hash is sha256(plaintext || device_salt)", got == want,
       f"got {got}\nwant {want}")
 
 # Tamper with one byte: the MAC must stop verifying.
-tampered = expected.replace("portao-01", "portao-02", 1)
+tampered = expected.replace("test-gate-01", "test-gate-02", 1)
 sig = tampered.split("mac ")[0]
 check("a one-field change breaks the MAC",
       hmac.new(bytes.fromhex(KEY), sig.encode(),
@@ -100,32 +99,32 @@ check("a one-field change breaks the MAC",
 
 # --------------------------------------------------- the five slots
 for i in range(3, 5):
-    q(f"""select code_id from issue_code('portao-01',
+    q(f"""select code_id from issue_code('test-gate-01',
           to_timestamp({1800000000 + i}), to_timestamp({1900000000 + i}));""")
-err = q_fails("select code_id from issue_code('portao-01', now(), now() + interval '1 day');")
+err = q_fails("select code_id from issue_code('test-gate-01', now(), now() + interval '1 day');")
 check("a sixth live code is refused", "five live codes" in err, err)
 
-slots = q("select string_agg(slot::text, ',' order by slot) from gate_live_code where gate_id='portao-01';")
+slots = q("select string_agg(slot::text, ',' order by slot) from gate_live_code where gate_id='test-gate-01';")
 check("the five seats are 0..4", slots == "0,1,2,3,4", f"got {slots}")
 
 # Revoking frees exactly that seat, and moves the generation.
-before = int(q("select generation from gate where gate_id='portao-01';"))
+before = int(q("select generation from gate where gate_id='test-gate-01';"))
 q(f"select revoke_code('{issued[1][0]}');")
-after = int(q("select generation from gate where gate_id='portao-01';"))
+after = int(q("select generation from gate where gate_id='test-gate-01';"))
 check("revoking moves the generation", after == before + 1, f"{before} -> {after}")
 free = q("""select n from generate_series(0,4) n where not exists
-            (select 1 from access_code c where c.gate_id='portao-01'
+            (select 1 from access_code c where c.gate_id='test-gate-01'
              and c.revoked_at is null and c.slot=n);""")
 check("revoking frees the seat it held", free == "1", f"free seat: {free}")
 
 # ------------------------------------------- windows and reaping
 q("""insert into access_code (code_id, gate_id, code_hash, valid_from,
        valid_until, slot)
-     values ('deadbeef', 'portao-01', decode(repeat('aa',32),'hex'),
+     values ('deadbeef', 'test-gate-01', decode(repeat('aa',32),'hex'),
              now() - interval '2 day', now() - interval '1 day', 1);""")
 inset = q("select count(*) from gate_live_code where code_id='deadbeef';")
 check("an expired code is not in the live set", inset == "0", f"got {inset}")
-held = q("""select count(*) from access_code where gate_id='portao-01'
+held = q("""select count(*) from access_code where gate_id='test-gate-01'
             and revoked_at is null;""")
 check("but it still holds its seat until reaped", held == "5", f"got {held}")
 reaped = q("select reap_expired_codes();")
@@ -133,46 +132,64 @@ check("reap_expired_codes frees it", reaped == "1", f"got {reaped}")
 
 err = q_fails("""insert into access_code (code_id, gate_id, code_hash,
                    valid_from, valid_until, slot)
-                 values ('ffffffff','portao-01', decode(repeat('bb',32),'hex'),
+                 values ('ffffffff','test-gate-01', decode(repeat('bb',32),'hex'),
                          now(), now() - interval '1 hour', 1);""")
 check("an inverted window cannot be stored", "window_runs_forwards" in err, err)
 
 err = q_fails("""insert into access_code (code_id, gate_id, code_hash,
                    valid_from, valid_until, slot)
-                 values ('NOTHEX00','portao-01', decode(repeat('bb',32),'hex'),
+                 values ('NOTHEX00','test-gate-01', decode(repeat('bb',32),'hex'),
                          now(), now()+interval '1 day', 1);""")
 check("a non-hex id cannot be stored", "code_id_check" in err, err)
 
 # --------------------------------------------- cross-gate movement
-q("insert into gate (gate_id) values ('portao-02');")
-err = q_fails(f"update access_code set gate_id='portao-02' where code_id='{issued[0][0]}';")
+q("insert into gate (gate_id) values ('test-gate-02');")
+err = q_fails(f"update access_code set gate_id='test-gate-02' where code_id='{issued[0][0]}';")
 check("a code cannot move between gates", "cannot move between gates" in err, err)
 
 # ------------------------------------------------ the empty set
 # ADR 0007: an empty set is honoured, and is how mass revocation works.
-q("update access_code set revoked_at = now() where gate_id='portao-01' and revoked_at is null;")
-empty = q("select gate_sync_body('portao-01');")
-gen_now = int(q("select generation from gate where gate_id='portao-01';"))
-sig = f"portao-sync v1\ngate portao-01\ngen {gen_now}\nend\n"
+q("update access_code set revoked_at = now() where gate_id='test-gate-01' and revoked_at is null;")
+empty = q("select gate_sync_body('test-gate-01');")
+gen_now = int(q("select generation from gate where gate_id='test-gate-01';"))
+sig = f"portao-sync v1\ngate test-gate-01\ngen {gen_now}\nend\n"
 want_mac = hmac.new(bytes.fromhex(KEY), sig.encode(), hashlib.sha256).hexdigest()
 check("an empty set still produces a valid signed body",
       empty.rstrip("\n") == (sig + f"mac {want_mac}").rstrip("\n"),
       f"got:\n{empty!r}")
 
 # ------------------------------------------------- the tg counter
-c1 = int(q("select next_tg_counter('portao-01');"))
-c2 = int(q("select next_tg_counter('portao-01');"))
+c1 = int(q("select next_tg_counter('test-gate-01');"))
+c2 = int(q("select next_tg_counter('test-gate-01');"))
 check("the tg counter is monotonic", c2 == c1 + 1, f"{c1}, {c2}")
 
 # ------------------------------------------------------- body size
 # SYNC_BODY_MAX is 2048; more than 8 entries is refused outright.
-q("delete from access_code where gate_id='portao-01';")
+q("delete from access_code where gate_id='test-gate-01';")
 for i in range(5):
-    q(f"""select code_id from issue_code('portao-01',
+    q(f"""select code_id from issue_code('test-gate-01',
           to_timestamp(1800000000), to_timestamp(1999999999));""")
-size = len(q("select gate_sync_body('portao-01');").encode()) + 1
+size = len(q("select gate_sync_body('test-gate-01');").encode()) + 1
 check("a full five-code body fits SYNC_BODY_MAX (2048)", size < 2048,
       f"{size} bytes")
 print(f"\n      a full body is {size} bytes of the 2048 the device accepts")
+
+# ------------------------------------------- the suite stays in its lane
+# These suites write and delete. Everything they touch is scoped to
+# pg.TEST_PREFIX - but "scoped" is a claim about code, and this is the
+# check that makes it a fact. A real gate shares the database during
+# development; it must come through a run untouched.
+SENTINEL = "sentinel-do-not-delete"
+q(f"""insert into gate (gate_id, label) values ('{SENTINEL}', 'not a fixture')
+      on conflict (gate_id) do nothing;""")
+q(f"""insert into gate_secret (gate_id, device_salt, delivery_key)
+      values ('{SENTINEL}', 'sentinel-salt-long-enough', decode(repeat('11',32),'hex'))
+      on conflict (gate_id) do nothing;""")
+cleanup()
+alive = q(f"""select count(*) from gate g join gate_secret s using (gate_id)
+               where g.gate_id = '{SENTINEL}';""")
+check("a gate outside the test prefix survives a full cleanup",
+      alive == "1", f"got {alive}")
+q(f"delete from gate where gate_id = '{SENTINEL}';")
 
 sys.exit(summary())

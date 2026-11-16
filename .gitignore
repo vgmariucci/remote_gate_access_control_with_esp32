@@ -39,3 +39,8 @@ __pycache__/
 node_modules/
 dist/
 .next/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
