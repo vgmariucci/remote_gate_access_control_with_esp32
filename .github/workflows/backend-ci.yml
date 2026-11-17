@@ -1,0 +1,117 @@
+name: backend-ci
+
+# No `paths:` filter, for the same reason firmware-ci has none: these
+# are required checks, and a run that is filtered out never reports a
+# status, so a pull request that does not touch backend/ would wait
+# forever on a check that never starts.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suites:
+    name: backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_DB: gate
+          POSTGRES_USER: gate
+          POSTGRES_PASSWORD: gate
+        ports:
+          - 5432:5432
+        # Without a health check the steps start while initdb is still
+        # running, and the first connection fails for reasons that look
+        # like anything but a race.
+        options: >-
+          --health-cmd "pg_isready -U gate -d gate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: gate
+      PGPASSWORD: gate
+      PGDATABASE: gate
+      # PGHOST being set is what makes backend/tests/pg.py use a host
+      # psql rather than looking for the compose container, which does
+      # not exist here.
+      VERIFY_VIA: psql
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install a psql
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          psql --version
+
+      - name: Run the migrations
+        shell: bash
+        run: |
+          for f in backend/migrations/*.sql; do
+            echo "-- $f"
+            psql -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Prepare the test database
+        shell: bash
+        run: |
+          # What backend/dev_setup.sh does locally. The password is a
+          # throwaway for a container that lives for one job.
+          psql -v ON_ERROR_STOP=1 -q \
+            -c "create role api_user login password 'ci';" \
+            -c "grant gate_app to api_user;" \
+            -c "alter database gate set gate.disposable = 'on';"
+
+      - name: Install the API's dependencies
+        shell: bash
+        run: pip install -q -r backend/requirements.txt
+
+      - name: Schema
+        shell: bash
+        run: python3 backend/tests/verify_schema.py
+
+      - name: Interaction log
+        shell: bash
+        run: python3 backend/tests/verify_interaction_log.py
+
+      - name: API
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://api_user:ci@localhost:5432/gate
+          ADMIN_TOKEN: ci-token-for-this-job-only
+        run: python3 backend/tests/verify_api.py
+
+      - name: The suites must refuse an unmarked database
+        shell: bash
+        run: |
+          # The guard is the one check with no test of its own, because
+          # proving it needs a database nobody marked. Make one.
+          psql -v ON_ERROR_STOP=1 -q -c "create database unmarked owner gate;"
+          out=$(PGDATABASE=unmarked python3 backend/tests/verify_schema.py 2>&1) && rc=0 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the suites ran against an unmarked database"
+            exit 1
+          fi
+          # It must stop for the right reason. An empty database would
+          # fail anyway; that would prove nothing.
+          grep -q "not marked disposable" <<<"$out" || {
+            echo "::error::refused, but not by the guard:"; echo "$out"; exit 1; }
+          echo "refused by the guard, as it should be"
