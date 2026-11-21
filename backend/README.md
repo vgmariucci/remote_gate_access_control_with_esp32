@@ -71,11 +71,46 @@ both directions is covered by an HMAC. A caller who cannot sign gets
 | `POST /admin/gates/{id}/codes` | issue; returns the plaintext **once** |
 | `DELETE /admin/codes/{code_id}` | revoke |
 | `GET /admin/gates/{id}/log` | the trail, in words, with its gaps |
+| `GET /admin/drift` | which gates are showing the wrong code set |
+| `POST /admin/publish` | push every gate that is not current |
+| `POST /admin/gates/{id}/publish` | push one |
 | `GET /healthz` | |
 
 The poll takes no query string and no headers, because the device sends
 neither — it fetches the whole body every time and compares the `gen`
 line to what it holds. Do not add a required parameter here.
+
+## Publishing
+
+The device polls **object storage**, not this process. ADR 0007 made
+the poll the correctness mechanism, and that argument only holds if
+the thing being polled is up — so the signed body goes to a bucket and
+the API becomes an admin tool that can be down for a day without a
+guest noticing.
+
+The price is a new way to be silently wrong: a code committed here
+that never reached the bucket. The gate cannot see it, the database
+says it exists, and polling does not repair it, because the device is
+faithfully fetching a stale body.
+
+So publishing is tracked, not assumed:
+
+- `gate_publication` records what is live, written **only after** a
+  successful upload. Recording first would make a failed upload look
+  published — the one outcome nothing downstream could detect.
+- `gate_drift` answers "is any gate showing the wrong code set?" in one
+  query, and `GET /admin/drift` exposes it.
+- `backend/reconcile.py` republishes anything behind. **Run it on a
+  timer.** It is the mechanism, not housekeeping, and it exits non-zero
+  while any gate is still behind so a monitor can alert on it.
+
+```cron
+*/5 * * * * cd /srv/portao && . docker/.env && python3 backend/reconcile.py
+```
+
+Issuing and revoking publish inline, after the commit. A failure there
+does not fail the request — the code is valid and committed — but it is
+reported in the response and left for the reconciler.
 
 ## The tests
 
@@ -83,6 +118,7 @@ line to what it holds. Do not add a required parameter here.
 python3 backend/tests/verify_schema.py
 python3 backend/tests/verify_interaction_log.py
 DATABASE_URL=... python3 backend/tests/verify_api.py
+DATABASE_URL=... python3 backend/tests/verify_publish.py
 ```
 
 The first two need only a `psql`, and will borrow the one inside the

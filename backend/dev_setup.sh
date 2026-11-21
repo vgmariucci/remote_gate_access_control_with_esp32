@@ -48,8 +48,32 @@ grant gate_app to api_user;
 alter database ${DB_NAME} set gate.disposable = 'on';
 SQL
 
-echo
-echo "api_user ready, and ${DB_NAME} is marked disposable."
-echo "Put this in docker/.env:"
-echo
-echo "DATABASE_URL=postgresql://api_user:${API_PASS}@localhost:5432/${DB_NAME}"
+URL="postgresql://api_user:${API_PASS}@localhost:5432/${DB_NAME}"
+ENV_FILE=docker/.env
+
+# Write the file rather than print the password. A secret echoed to a
+# terminal ends up in scrollback, in screenshots and in chat logs - and
+# the "I forgot to paste the new line" failure looks like an
+# authentication bug rather than a missed step.
+if [ -f "$ENV_FILE" ]; then
+    if grep -q '^DATABASE_URL=' "$ENV_FILE"; then
+        tmp=$(mktemp)
+        # The password is hex, so no separator in it can confuse this.
+        sed "s|^DATABASE_URL=.*|DATABASE_URL=${URL}|" "$ENV_FILE" > "$tmp"
+        cat "$tmp" > "$ENV_FILE"      # keep the inode, and the permissions
+        rm -f "$tmp"
+    else
+        printf '\nDATABASE_URL=%s\n' "$URL" >> "$ENV_FILE"
+    fi
+    echo
+    echo "api_user ready, ${DB_NAME} is marked disposable,"
+    echo "and ${ENV_FILE} now has the matching DATABASE_URL."
+    echo "The password was not printed. Re-source it:"
+    echo
+    echo "    set -a; . ${ENV_FILE}; set +a"
+else
+    echo
+    echo "api_user ready, and ${DB_NAME} is marked disposable."
+    echo "There is no ${ENV_FILE} yet. Create it from .env.example, then"
+    echo "run this again and it will fill in DATABASE_URL for you."
+fi
