@@ -99,6 +99,13 @@ jobs:
           ADMIN_TOKEN: ci-token-for-this-job-only
         run: python3 backend/tests/verify_api.py
 
+      - name: Publishing
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://api_user:ci@localhost:5432/gate
+          ADMIN_TOKEN: ci-token-for-this-job-only
+        run: python3 backend/tests/verify_publish.py
+
       - name: The suites must refuse an unmarked database
         shell: bash
         run: |
